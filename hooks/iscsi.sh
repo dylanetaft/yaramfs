@@ -13,8 +13,8 @@ prepare() {
     die ${LINENO} "iscsistart not executable: ${YARAMFS_CFG_P_ISCSITART}"
   fi
 
-  # shellcheck disable=SC2086
-  ensure_modules ${ISCSI_MODULES}
+  # Sourced into the same shell as later hooks — assignment is enough (no export).
+  YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} ${ISCSI_MODULES}"
 
   install_binary "${YARAMFS_CFG_P_ISCSITART}" /sbin/iscsistart
 
@@ -30,7 +30,14 @@ prepare() {
 }
 
 boot() {
-  # Stack should already be in /etc/yaramfs-modules from prepare; load if listed.
+  # Config order is before modules (ADDL at prepare); load the prepared list first.
+  if [ -f /etc/yaramfs-modules ]; then
+    while read -r m || [ -n "${m}" ]; do
+      [ -n "${m}" ] || continue
+      modprobe "${m}" || die ${LINENO} "modprobe ${m} failed"
+    done < /etc/yaramfs-modules
+  fi
+
   # Hard-fail iBFT network + session (hook is opt-in via config symlink).
   iscsistart -N || die ${LINENO} "iscsistart -N (iBFT network) failed"
   iscsistart -b || die ${LINENO} "iscsistart -b (iBFT connect) failed"

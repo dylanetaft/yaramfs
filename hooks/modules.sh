@@ -3,8 +3,13 @@
 . hooks/shared/install.sh
 
 prepare() {
-  modules_prepare_defaults
-  BUILD_DIR=${YARAMFS_CFG_PREP_BUILD_DIR}
+  default_value YARAMFS_CFG_KERNEL_VERSION "$(uname -r)" ${LINENO}
+  default_value YARAMFS_CFG_MODULES_DIR "/lib/modules/${YARAMFS_CFG_KERNEL_VERSION}" ${LINENO}
+  # unset → GPU defaults; "" → no blacklist; set → that list only.
+  default_if_unset YARAMFS_CFG_MODULES_BLACKLIST \
+    "nvidia nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nouveau amdgpu radeon i915 xe" \
+    ${LINENO}
+  default_value YARAMFS_CFG_P_BUSYBOX_PATH "$(which busybox)" ${LINENO}
 
   roots=$(mktemp)
 
@@ -16,6 +21,11 @@ prepare() {
   else
     lsmod | awk 'NR > 1 { print $1 }' > "${roots}"
   fi
+
+  # Extra roots from earlier hooks (e.g. iscsi); same shell — no export needed.
+  for m in ${YARAMFS_CFG_MODULES_ADDL}; do
+    printf '%s\n' "${m}"
+  done >> "${roots}"
 
   # shellcheck disable=SC2046
   set -- $(cat "${roots}")

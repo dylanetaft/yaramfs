@@ -28,27 +28,21 @@ modules_name_from_ko() {
   modules_norm "${n}"
 }
 
-# Resolve KVER/MODDIR/BB/blacklist defaults used by ensure_modules.
-modules_prepare_defaults() {
-  default_value YARAMFS_CFG_KERNEL_VERSION "$(uname -r)" ${LINENO}
-  default_value YARAMFS_CFG_MODULES_DIR "/lib/modules/${YARAMFS_CFG_KERNEL_VERSION}" ${LINENO}
-  # unset → GPU defaults; "" → no blacklist; set → that list only.
-  default_if_unset YARAMFS_CFG_MODULES_BLACKLIST \
-    "nvidia nvidia_drm nvidia_modeset nvidia_uvm nvidia_peermem nouveau amdgpu radeon i915 xe" \
-    ${LINENO}
-  default_value YARAMFS_CFG_P_BUSYBOX_PATH "$(which busybox)" ${LINENO}
-}
-
 # ensure_modules NAME [NAME...]
 # Copy each root module + hard deps into the build tree, merge roots into
 # $BUILD_DIR/etc/yaramfs-modules, and run busybox depmod when anything was copied.
+# Caller must set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR,
+# YARAMFS_CFG_P_BUSYBOX_PATH (and optionally YARAMFS_CFG_MODULES_BLACKLIST).
 # Use _em_* locals-by-convention so we do not clobber for_each_hook's name=.
 ensure_modules() {
-  modules_prepare_defaults
   _em_kver=${YARAMFS_CFG_KERNEL_VERSION}
   _em_moddir=${YARAMFS_CFG_MODULES_DIR}
   _em_bb=${YARAMFS_CFG_P_BUSYBOX_PATH}
   _em_build=${YARAMFS_CFG_PREP_BUILD_DIR}
+
+  if [ -z "${_em_kver}" ] || [ -z "${_em_moddir}" ] || [ -z "${_em_bb}" ]; then
+    die ${LINENO} "ensure_modules: set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR, YARAMFS_CFG_P_BUSYBOX_PATH first"
+  fi
 
   if [ ! -d "${_em_moddir}" ]; then
     die ${LINENO} "modules dir not found: ${_em_moddir}"
