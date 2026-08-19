@@ -5,7 +5,7 @@ prepare() {
   default_value YARAMFS_CFG_OUT_CPIO "out/initramfs.cpio.gz" ${LINENO}
   default_value YARAMFS_CFG_QEMU_MACHINE "virt" ${LINENO}
   default_value YARAMFS_CFG_QEMU_CPU "max" ${LINENO}
-  default_value YARAMFS_CFG_QEMU_MEM "512" ${LINENO}
+  default_value YARAMFS_CFG_QEMU_MEM "1024" ${LINENO}
   default_value YARAMFS_CFG_QEMU_APPEND "console=ttyAMA0 rdinit=/init panic=1" ${LINENO}
 
   OUT=${YARAMFS_CFG_OUT_CPIO}

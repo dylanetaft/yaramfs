@@ -82,3 +82,71 @@ for_each_hook() {
     die ${LINENO} "no hooks found in ${YARAMFS_CFG_CONFIG_DIR}"
   fi
 }
+
+# install_binary SRC DEST
+# Copy ELF SRC into the build root at DEST (absolute image path, e.g. /sbin/iscsistart)
+# and all shared libraries from lddtree -l (flat list), preserving host paths.
+install_binary() {
+  _ib_src=$1
+  _ib_dest=$2
+  _ib_build=${YARAMFS_CFG_PREP_BUILD_DIR}
+
+  if [ -z "${_ib_src}" ] || [ -z "${_ib_dest}" ]; then
+    die ${LINENO} "install_binary requires SRC and DEST"
+  fi
+  if [ ! -f "${_ib_src}" ]; then
+    die ${LINENO} "install_binary: source not found: ${_ib_src}"
+  fi
+  case "${_ib_dest}" in
+    /*) ;;
+    *) die ${LINENO} "install_binary DEST must be absolute image path: ${_ib_dest}" ;;
+  esac
+
+  default_value YARAMFS_CFG_P_LDDTREE "$(which lddtree)" ${LINENO}
+  _ib_lddtree=${YARAMFS_CFG_P_LDDTREE}
+  if [ ! -x "${_ib_lddtree}" ]; then
+    die ${LINENO} "lddtree not executable: ${_ib_lddtree}"
+  fi
+
+  mkdir -p "${_ib_build}/$(dirname "${_ib_dest}")"
+  install -m 0755 "${_ib_src}" "${_ib_build}${_ib_dest}"
+
+  # Flat dependency list: binary path, interpreter, then libs.
+  if ! _ib_deps=$("${_ib_lddtree}" -l "${_ib_src}" 2>&1); then
+    die ${LINENO} "lddtree -l ${_ib_src} failed: ${_ib_deps}"
+  fi
+
+  _ib_nlib=0
+  while read -r _ib_p || [ -n "${_ib_p}" ]; do
+    [ -n "${_ib_p}" ] || continue
+    # Skip the binary itself (already installed at DEST).
+    [ "${_ib_p}" = "${_ib_src}" ] && continue
+    case "${_ib_p}" in
+      /*) ;;
+      *) continue ;;
+    esac
+    if [ ! -e "${_ib_p}" ]; then
+      die ${LINENO} "shared library missing for ${_ib_src}: ${_ib_p}"
+    fi
+    mkdir -p "${_ib_build}/$(dirname "${_ib_p}")"
+    # Dereference so soname paths become real files at the expected path.
+    cp -aL "${_ib_p}" "${_ib_build}${_ib_p}"
+    _ib_nlib=$((_ib_nlib + 1))
+  done <<EOF
+${_ib_deps}
+EOF
+
+  # Loader often lives at /lib/ld-linux-*.so via symlink to /lib64; ensure /lib64 → usr/lib64.
+  if [ -L /lib64 ] && [ ! -e "${_ib_build}/lib64" ]; then
+    mkdir -p "${_ib_build}"
+    cp -a /lib64 "${_ib_build}/lib64"
+  fi
+  if [ -L /lib/ld-linux-aarch64.so.1 ] || [ -e /lib/ld-linux-aarch64.so.1 ]; then
+    if [ ! -e "${_ib_build}/lib/ld-linux-aarch64.so.1" ]; then
+      mkdir -p "${_ib_build}/lib"
+      cp -a /lib/ld-linux-aarch64.so.1 "${_ib_build}/lib/ld-linux-aarch64.so.1"
+    fi
+  fi
+
+  echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs)" >&2
+}

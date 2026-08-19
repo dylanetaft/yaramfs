@@ -31,11 +31,12 @@ prepare() {
   # Shared runner used by guest /init (for_each_hook, etc.).
   mkdir -p "${BUILD_DIR}/hooks/shared"
   install -m 0644 hooks/shared/head.sh "${BUILD_DIR}/hooks/shared/head.sh"
-  install -m 0644 hooks/shared/install.sh "${BUILD_DIR}/hooks/shared/install.sh"
 
   # Copy resolved hook files so guest for_each_hook boot can source them.
   for name in $(list_hooks); do
     path="${YARAMFS_CFG_CONFIG_DIR}/${name}"
+    prepare_only=$(echo "${name}" | grep -e '^[0-9]*-prepare');
+    [ ! -n "${prepare_only}" ] || continue
     [ -f "${path}" ] || continue
     cp -L "${path}" "${BUILD_DIR}/hooks/${name}"
     chmod 0755 "${BUILD_DIR}/hooks/${name}"
