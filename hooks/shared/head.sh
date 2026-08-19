@@ -22,6 +22,20 @@ default_value() {
   fi
 }
 
+# Apply default only when VAR is unset. Empty string is kept (blank default OK).
+# Usage: default_if_unset VAR_NAME "default words" ${LINENO}
+default_if_unset() {
+  var_name="$1"
+  default_var_value="$2"
+  caller_lineno="$3"
+
+  # ${var+x} expands to x if set (even to ""), else nothing.
+  eval "is_set=\${${var_name}+x}"
+  if [ -z "${is_set}" ]; then
+    eval "${var_name}=\"\${default_var_value}\""
+  fi
+}
+
 list_hooks() {
   if [ ! -d "${YARAMFS_CFG_CONFIG_DIR}" ]; then
     die ${LINENO} "config dir ${YARAMFS_CFG_CONFIG_DIR} does not exist"
@@ -52,18 +66,19 @@ for_each_hook() {
     die ${LINENO} "phase must be prepare or boot"
   fi
 
-  any=
-  for name in $(list_hooks); do
-    path="${YARAMFS_CFG_CONFIG_DIR}/${name}"
+  _feh_any=
+  for _feh_name in $(list_hooks); do
+    _feh_path="${YARAMFS_CFG_CONFIG_DIR}/${_feh_name}"
     # Files only (skip dirs like hooks/shared on the guest).
-    [ -f "${path}" ] || continue
-    any=1
-    echo "=> ${name} ${phase}" >&2
+    [ -f "${_feh_path}" ] || continue
+    _feh_any=1
+    echo "=> ${_feh_name} ${phase}" >&2
     set -- "${phase}"
-    . "${path}" || die ${LINENO} "hook ${name} ${phase} failed"
+    # shellcheck disable=SC1090
+    . "${_feh_path}" || die ${LINENO} "hook ${_feh_name} ${phase} failed"
   done
 
-  if [ -z "${any}" ]; then
+  if [ -z "${_feh_any}" ]; then
     die ${LINENO} "no hooks found in ${YARAMFS_CFG_CONFIG_DIR}"
   fi
 }
