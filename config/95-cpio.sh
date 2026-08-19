@@ -1,0 +1,1 @@
+../hooks/cpio.sh

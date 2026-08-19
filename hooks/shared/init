@@ -1,0 +1,10 @@
+#!/bin/sh
+# PID 1 inside the initramfs — same hook runner as host runme.sh.
+export PATH=/bin:/sbin
+YARAMFS_CFG_CONFIG_DIR=/hooks
+
+. /hooks/shared/head.sh
+for_each_hook boot
+
+# Fallback if no hook exec'd a long-lived process.
+exec setsid cttyhack sh
