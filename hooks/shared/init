@@ -8,7 +8,6 @@ export YARAMFS_CFG_CONFIG_DIR
 mkdir -p /tmp
 
 . /hooks/shared/head.sh
-for_each_hook boot
-
-# Fallback if no hook exec'd a long-lived process.
+# Boot hooks run as children; rescue shell must stay PID 1 (this process).
+for_each_hook boot || echo "yaramfs: boot hooks failed" >&2
 hook_fail_shell

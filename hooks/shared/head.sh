@@ -77,20 +77,26 @@ prepare_or_boot() {
   fi
 }
 
-# Drop to an interactive shell (boot failure / rescue). Replaces the caller.
+# Drop to an interactive shell as the current process (use from PID 1 /init).
 hook_fail_shell() {
   echo "yaramfs: dropping to shell" >&2
-  if command -v cttyhack >/dev/null 2>&1; then
-    exec setsid cttyhack sh
+  if [ -c /dev/console ]; then
+    if command -v cttyhack >/dev/null 2>&1; then
+      exec setsid cttyhack sh -i </dev/console >/dev/console 2>&1
+    fi
+    exec sh -i </dev/console >/dev/console 2>&1
   fi
-  exec sh
+  if command -v cttyhack >/dev/null 2>&1; then
+    exec setsid cttyhack sh -i
+  fi
+  exec sh -i
 }
 
 # Run each hook as its own process (sequential). Success/failure is only the
 # child exit status (die → 1). After success, if YARAMFS_CFG_EXPORTS_FILE
 # exists, source it then delete it so the next child inherits any export_cfg
 # vars. Missing exports file is normal (hook had nothing to publish).
-# On failure: prepare aborts; boot opens a shell.
+# On failure: prepare aborts (die); boot returns 1 so /init can hook_fail_shell.
 for_each_hook() {
   phase=$1
   if [ -z "${phase}" ]; then
@@ -121,7 +127,7 @@ for_each_hook() {
       echo "yaramfs: hook ${_feh_name} ${phase} failed" >&2
       rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
       if [ "${phase}" = "boot" ]; then
-        hook_fail_shell
+        return 1
       fi
       die ${LINENO} "hook ${_feh_name} ${phase} failed"
     fi
