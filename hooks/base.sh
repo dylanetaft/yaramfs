@@ -12,10 +12,14 @@ prepare() {
   mkdir "${BUILD_DIR}/proc"
   mkdir "${BUILD_DIR}/dev"
   mkdir "${BUILD_DIR}/run"
+  mkdir "${BUILD_DIR}/tmp"
   mkdir "${BUILD_DIR}/bin"
   mkdir "${BUILD_DIR}/sbin"
-  mkdir "${BUILD_DIR}/lib"
-  mkdir "${BUILD_DIR}/lib64"
+  # Merged-/usr layout (same idea as the host): libs land under usr/lib*,
+  # ELF interpreter paths like /lib64/ld-linux-*.so stay valid via symlinks.
+  mkdir -p "${BUILD_DIR}/usr/lib" "${BUILD_DIR}/usr/lib64"
+  ln -s usr/lib "${BUILD_DIR}/lib"
+  ln -s usr/lib64 "${BUILD_DIR}/lib64"
   mkdir -p "${BUILD_DIR}/mnt/root"
   mkdir "${BUILD_DIR}/etc"
   mkdir "${BUILD_DIR}/root"
@@ -32,7 +36,7 @@ prepare() {
   mkdir -p "${BUILD_DIR}/hooks/shared"
   install -m 0644 hooks/shared/head.sh "${BUILD_DIR}/hooks/shared/head.sh"
 
-  # Copy resolved hook files so guest for_each_hook boot can source them.
+  # Copy resolved hook files so guest for_each_hook can run them as processes.
   for name in $(list_hooks); do
     path="${YARAMFS_CFG_CONFIG_DIR}/${name}"
     prepare_only=$(echo "${name}" | grep -e '^[0-9]*-prepare');
@@ -49,6 +53,8 @@ boot() {
   mount -t devtmpfs devtmpfs /dev
   mkdir -p /dev/pts
   mount -t devpts devpts /dev/pts 2>/dev/null || true
+  mkdir -p /tmp
+  mount -t tmpfs tmpfs /tmp 2>/dev/null || true
 }
 
 prepare_or_boot "$@"

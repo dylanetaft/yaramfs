@@ -5,6 +5,7 @@ die() { echo "$0:$1 $2" >&2; exit 1; }
 # Guest /init sets YARAMFS_CFG_CONFIG_DIR=/hooks before sourcing this file.
 : ${YARAMFS_CFG_PREP_BUILD_DIR:=build}
 : ${YARAMFS_CFG_CONFIG_DIR:=config}
+: ${YARAMFS_CFG_EXPORTS_FILE:=/tmp/yaramfs_exports}
 
 default_value() {
   var_name="$1"
@@ -36,6 +37,27 @@ default_if_unset() {
   fi
 }
 
+# Single-quote VALUE for safe re-parse by . (shell).
+sh_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# export_cfg VAR_NAME [VAR_NAME...]
+# Append export lines to YARAMFS_CFG_EXPORTS_FILE so the parent runner can
+# source them after this (child) hook exits. Creates /tmp if needed.
+export_cfg() {
+  default_if_unset YARAMFS_CFG_EXPORTS_FILE "/tmp/yaramfs_exports" ${LINENO}
+  _ec_file=${YARAMFS_CFG_EXPORTS_FILE}
+  mkdir -p "$(dirname "${_ec_file}")" || die ${LINENO} "mkdir for ${_ec_file} failed"
+
+  for _ec_name in "$@"; do
+    [ -n "${_ec_name}" ] || continue
+    eval "_ec_val=\${${_ec_name}}"
+    printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
+      || die ${LINENO} "write ${_ec_file} failed"
+  done
+}
+
 list_hooks() {
   if [ ! -d "${YARAMFS_CFG_CONFIG_DIR}" ]; then
     die ${LINENO} "config dir ${YARAMFS_CFG_CONFIG_DIR} does not exist"
@@ -55,8 +77,20 @@ prepare_or_boot() {
   fi
 }
 
-# Source each hook with $1=phase. Hooks define prepare/boot and call prepare_or_boot.
-# Sourcing (both phases) so boot's exec replaces PID 1 / the runner.
+# Drop to an interactive shell (boot failure / rescue). Replaces the caller.
+hook_fail_shell() {
+  echo "yaramfs: dropping to shell" >&2
+  if command -v cttyhack >/dev/null 2>&1; then
+    exec setsid cttyhack sh
+  fi
+  exec sh
+}
+
+# Run each hook as its own process (sequential). Success/failure is only the
+# child exit status (die → 1). After success, if YARAMFS_CFG_EXPORTS_FILE
+# exists, source it then delete it so the next child inherits any export_cfg
+# vars. Missing exports file is normal (hook had nothing to publish).
+# On failure: prepare aborts; boot opens a shell.
 for_each_hook() {
   phase=$1
   if [ -z "${phase}" ]; then
@@ -66,6 +100,14 @@ for_each_hook() {
     die ${LINENO} "phase must be prepare or boot"
   fi
 
+  default_if_unset YARAMFS_CFG_EXPORTS_FILE "/tmp/yaramfs_exports" ${LINENO}
+  mkdir -p "$(dirname "${YARAMFS_CFG_EXPORTS_FILE}")" \
+    || die ${LINENO} "mkdir for ${YARAMFS_CFG_EXPORTS_FILE} failed"
+  rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
+
+  # Children inherit these (defaults live in the runner shell otherwise).
+  export YARAMFS_CFG_PREP_BUILD_DIR YARAMFS_CFG_CONFIG_DIR YARAMFS_CFG_EXPORTS_FILE
+
   _feh_any=
   for _feh_name in $(list_hooks); do
     _feh_path="${YARAMFS_CFG_CONFIG_DIR}/${_feh_name}"
@@ -73,9 +115,23 @@ for_each_hook() {
     [ -f "${_feh_path}" ] || continue
     _feh_any=1
     echo "=> ${_feh_name} ${phase}" >&2
-    set -- "${phase}"
-    # shellcheck disable=SC1090
-    . "${_feh_path}" || die ${LINENO} "hook ${_feh_name} ${phase} failed"
+
+    rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
+    if ! sh "${_feh_path}" "${phase}"; then
+      echo "yaramfs: hook ${_feh_name} ${phase} failed" >&2
+      rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
+      if [ "${phase}" = "boot" ]; then
+        hook_fail_shell
+      fi
+      die ${LINENO} "hook ${_feh_name} ${phase} failed"
+    fi
+
+    if [ -f "${YARAMFS_CFG_EXPORTS_FILE}" ]; then
+      # shellcheck disable=SC1090
+      . "${YARAMFS_CFG_EXPORTS_FILE}" \
+        || die ${LINENO} "sourcing ${YARAMFS_CFG_EXPORTS_FILE} after ${_feh_name} failed"
+      rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
+    fi
   done
 
   if [ -z "${_feh_any}" ]; then
@@ -128,25 +184,15 @@ install_binary() {
     if [ ! -e "${_ib_p}" ]; then
       die ${LINENO} "shared library missing for ${_ib_src}: ${_ib_p}"
     fi
+    # dirname may be a symlink (e.g. build/lib -> usr/lib); mkdir -p follows it.
     mkdir -p "${_ib_build}/$(dirname "${_ib_p}")"
-    # Dereference so soname paths become real files at the expected path.
+    # Dereference so the image gets a real file at the path lddtree named
+    # (interpreter often a host symlink like /lib/ld-linux-*.so -> ../lib64/...).
     cp -aL "${_ib_p}" "${_ib_build}${_ib_p}"
     _ib_nlib=$((_ib_nlib + 1))
   done <<EOF
 ${_ib_deps}
 EOF
-
-  # Loader often lives at /lib/ld-linux-*.so via symlink to /lib64; ensure /lib64 → usr/lib64.
-  if [ -L /lib64 ] && [ ! -e "${_ib_build}/lib64" ]; then
-    mkdir -p "${_ib_build}"
-    cp -a /lib64 "${_ib_build}/lib64"
-  fi
-  if [ -L /lib/ld-linux-aarch64.so.1 ] || [ -e /lib/ld-linux-aarch64.so.1 ]; then
-    if [ ! -e "${_ib_build}/lib/ld-linux-aarch64.so.1" ]; then
-      mkdir -p "${_ib_build}/lib"
-      cp -a /lib/ld-linux-aarch64.so.1 "${_ib_build}/lib/ld-linux-aarch64.so.1"
-    fi
-  fi
 
   echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs)" >&2
 }

@@ -14,8 +14,10 @@ prepare() {
     die ${LINENO} "iscsistart not executable: ${YARAMFS_CFG_P_ISCSITART}"
   fi
 
-  # Sourced into the same shell as later hooks — assignment is enough (no export).
+  # Parent runner sources export_cfg output after this hook process exits.
   YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} ${ISCSI_MODULES}"
+  YARAMFS_CFG_MODULES_ADDL=${YARAMFS_CFG_MODULES_ADDL# }
+  export_cfg YARAMFS_CFG_MODULES_ADDL
 
   install_binary "${YARAMFS_CFG_P_ISCSITART}" /sbin/iscsistart
 

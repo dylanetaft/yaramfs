@@ -6,10 +6,7 @@
 # (pre-set CFG wins), match MAC with ip/sysfs, rename to ibftN, optional VLAN,
 # then ip addr from iBFT. Config order: after modules, before boot-iscsi.
 
-prepare() {
-  # Non-zero iBFT vlan ids need 802.1Q.
-  YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} 8021q"
-}
+prepare() { :; }
 
 # Lowercase, strip whitespace/newlines (sysfs often has a trailing \n).
 _ibft_norm_mac() {

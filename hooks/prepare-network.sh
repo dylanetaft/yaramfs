@@ -34,9 +34,16 @@ prepare() {
   # Trim leading space from the loop accumulation.
   _net_mods=${_net_mods# }
 
+  # 8021q for iBFT (and other) VLAN bring-up; must be before modules hook.
+  _net_mods="${_net_mods} 8021q"
+  _net_mods=${_net_mods# }
+
   if [ -n "${_net_mods}" ]; then
     echo "network: NIC modules: ${_net_mods}" >&2
     YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} ${_net_mods}"
+    # Trim leading space if ADDL was empty before append.
+    YARAMFS_CFG_MODULES_ADDL=${YARAMFS_CFG_MODULES_ADDL# }
+    export_cfg YARAMFS_CFG_MODULES_ADDL
   else
     echo "network: no NIC modules (built-in, override empty, or nothing bound)" >&2
   fi
