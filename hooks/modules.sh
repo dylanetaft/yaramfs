@@ -6,7 +6,7 @@ prepare() {
   default_value YARAMFS_CFG_MODULES_DIR "/lib/modules/${YARAMFS_CFG_KERNEL_VERSION}" ${LINENO}
   default_value YARAMFS_CFG_P_BUSYBOX_PATH "$(which busybox)" ${LINENO}
 
-  # Roots: optional explicit list + ADDL from earlier hooks (network, iscsi, …).
+  # Roots: optional explicit list + ADDL from earlier hooks (network, input, iscsi, …).
   # shellcheck disable=SC2086
   set -- ${YARAMFS_CFG_MODULES} ${YARAMFS_CFG_MODULES_ADDL}
 
@@ -21,13 +21,13 @@ boot() {
   done < /etc/yaramfs-modules
 }
 
-
 # ensure_modules NAME [NAME...]
-# Copy each root module + hard deps into the build tree, merge roots into
-# $BUILD_DIR/etc/yaramfs-modules, and run busybox depmod when anything was copied.
+# Resolve each root with busybox modprobe -D -q, copy unique .ko paths into the
+# build tree, write boot roots to $BUILD_DIR/etc/yaramfs-modules, depmod if needed.
+# Builtin/missing roots are skipped (-q yields no insmod lines). Missing .ko files
+# are caught at copy time.
 # Caller must set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR,
 # YARAMFS_CFG_P_BUSYBOX_PATH.
-# Use _em_* locals-by-convention so we do not clobber for_each_hook's name=.
 ensure_modules() {
   _em_kver=${YARAMFS_CFG_KERNEL_VERSION}
   _em_moddir=${YARAMFS_CFG_MODULES_DIR}
@@ -37,7 +37,6 @@ ensure_modules() {
   if [ -z "${_em_kver}" ] || [ -z "${_em_moddir}" ] || [ -z "${_em_bb}" ]; then
     die ${LINENO} "ensure_modules: set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR, YARAMFS_CFG_P_BUSYBOX_PATH first"
   fi
-
   if [ ! -d "${_em_moddir}" ]; then
     die ${LINENO} "modules dir not found: ${_em_moddir}"
   fi
@@ -48,89 +47,75 @@ ensure_modules() {
     return 0
   fi
 
-  _em_paths=$(mktemp)
-  _em_bootlist=$(mktemp)
-  _em_ncopy=0
-
-  : > "${_em_paths}"
-  : > "${_em_bootlist}"
+  _em_deps=
+  _em_roots=
 
   for _em_name in "$@"; do
     [ -n "${_em_name}" ] || continue
 
-    if ! _em_dep_out=$("${_em_bb}" modprobe -D "${_em_name}" 2>&1); then
-      rm -f "${_em_paths}" "${_em_bootlist}"
-      die ${LINENO} "busybox modprobe -D ${_em_name} failed: ${_em_dep_out}"
+    # -q: builtin/missing → no output + fail; real modules still print insmod lines.
+    _em_out=$("${_em_bb}" modprobe -D -q "${_em_name}" 2>&1) || true
+
+    if [ -n "$(echo "${_em_out}" | grep -e '^insmod')" ]; then
+      _em_deps="${_em_deps}${_em_out}
+"
+      _em_roots="${_em_roots}${_em_name}
+"
+    else
+      echo "modules: skip ${_em_name} (builtin, missing, or no insmod paths)" >&2
     fi
-
-    printf '%s\n' "${_em_name}" >> "${_em_bootlist}"
-
-    # Avoid pipe subshell so die aborts prepare.
-    while read -r _em_cmd _em_ko _em_rest || [ -n "${_em_cmd}" ]; do
-      [ "${_em_cmd}" = "insmod" ] || continue
-      [ -n "${_em_ko}" ] || continue
-      if [ ! -f "${_em_ko}" ]; then
-        rm -f "${_em_paths}" "${_em_bootlist}"
-        die ${LINENO} "module file missing for ${_em_name}: ${_em_ko}"
-      fi
-      if ! grep -qxF "${_em_ko}" "${_em_paths}" 2>/dev/null; then
-        printf '%s\n' "${_em_ko}" >> "${_em_paths}"
-      fi
-    done <<EOF
-${_em_dep_out}
-EOF
   done
+
+  # Unique ko paths and root names (order irrelevant; modprobe resolves deps at boot).
+  _em_paths=$(printf '%s\n' "${_em_deps}" | awk '$1 == "insmod" && $2 != "" && !seen[$2]++ { print $2 }')
+  _em_boot=$(printf '%s\n' "${_em_roots}" | awk 'NF && !seen[$0]++')
 
   _em_dest_root="${_em_build}/lib/modules/${_em_kver}"
   mkdir -p "${_em_dest_root}"
 
+  _em_ncopy=0
   while read -r _em_ko || [ -n "${_em_ko}" ]; do
     [ -n "${_em_ko}" ] || continue
-    case "${_em_ko}" in
-      "${_em_moddir}"/*)
-        _em_rel=${_em_ko#"${_em_moddir}"/}
-        ;;
-      *)
-        case "${_em_ko}" in
-          */lib/modules/"${_em_kver}"/*)
-            _em_rel=${_em_ko#*/lib/modules/"${_em_kver}"/}
-            ;;
-          *)
-            rm -f "${_em_paths}" "${_em_bootlist}"
-            die ${LINENO} "module path not under ${_em_moddir}: ${_em_ko}"
-            ;;
-        esac
-        ;;
-    esac
+
+    if [ ! -f "${_em_ko}" ]; then
+      die ${LINENO} "module file missing: ${_em_ko}"
+    fi
+
+    # Prefix checks via ${var#pat}: non-match leaves the string unchanged.
+    if [ "${_em_ko}" != "${_em_ko#"${_em_moddir}"/}" ]; then
+      _em_rel=${_em_ko#"${_em_moddir}"/}
+    elif [ "${_em_ko}" != "${_em_ko#*/lib/modules/"${_em_kver}"/}" ]; then
+      _em_rel=${_em_ko#*/lib/modules/"${_em_kver}"/}
+    else
+      die ${LINENO} "module path not under ${_em_moddir}: ${_em_ko}"
+    fi
+
     _em_dest="${_em_dest_root}/${_em_rel}"
     if [ -e "${_em_dest}" ]; then
       continue
     fi
     mkdir -p "$(dirname "${_em_dest}")"
-    cp -a "${_em_ko}" "${_em_dest}"
+    cp -a "${_em_ko}" "${_em_dest}" || die ${LINENO} "cp ${_em_ko} failed"
     _em_ncopy=$((_em_ncopy + 1))
-  done < "${_em_paths}"
+  done <<EOF
+${_em_paths}
+EOF
 
   if [ "${_em_ncopy}" -gt 0 ]; then
-    "${_em_bb}" depmod -b "${_em_build}" "${_em_kver}" || {
-      rm -f "${_em_paths}" "${_em_bootlist}"
-      die ${LINENO} "busybox depmod -b ${_em_build} ${_em_kver} failed"
-    }
+    "${_em_bb}" depmod -b "${_em_build}" "${_em_kver}" \
+      || die ${LINENO} "busybox depmod -b ${_em_build} ${_em_kver} failed"
   fi
 
   mkdir -p "${_em_build}/etc"
   _em_bootfile="${_em_build}/etc/yaramfs-modules"
   if [ -f "${_em_bootfile}" ]; then
-    cat "${_em_bootfile}" >> "${_em_bootlist}"
+    _em_boot=$(printf '%s\n%s\n' "${_em_boot}" "$(cat "${_em_bootfile}")" | awk 'NF && !seen[$0]++')
   fi
-  LC_ALL=C sort -u "${_em_bootlist}" > "${_em_bootfile}"
+  printf '%s\n' "${_em_boot}" > "${_em_bootfile}"
   chmod 0644 "${_em_bootfile}"
 
-  _em_nboot=$(wc -l < "${_em_bootfile}" | tr -d ' ')
+  _em_nboot=$(grep -c . "${_em_bootfile}" 2>/dev/null || echo 0)
   echo "modules: ensure copied ${_em_ncopy} new ko, boot list ${_em_nboot} (kver ${_em_kver})" >&2
-
-  rm -f "${_em_paths}" "${_em_bootlist}"
 }
-
 
 prepare_or_boot "$@"
