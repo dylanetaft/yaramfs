@@ -8,6 +8,24 @@ export YARAMFS_CFG_CONFIG_DIR
 mkdir -p /tmp
 
 . /hooks/shared/head.sh
-# Boot hooks run as children; rescue shell must stay PID 1 (this process).
+# Boot hooks run as children; rescue shell / switch_root must stay PID 1.
 for_each_hook boot || echo "yaramfs: boot hooks failed" >&2
+
+if [ -n "${YARAMFS_CFG_NEWROOT}" ]; then
+  default_value YARAMFS_CFG_INIT "/sbin/init" ${LINENO}
+  _nr=${YARAMFS_CFG_NEWROOT}
+
+  # Hand off virtual filesystems so the real root keeps them.
+  for _d in proc sys dev run; do
+    if [ -d "${_nr}/${_d}" ] && mountpoint -q "/${_d}" 2>/dev/null; then
+      mount --move "/${_d}" "${_nr}/${_d}" 2>/dev/null \
+        || mount -o bind "/${_d}" "${_nr}/${_d}" 2>/dev/null \
+        || true
+    fi
+  done
+
+  echo "yaramfs: switch_root ${_nr} ${YARAMFS_CFG_INIT}" >&2
+  exec switch_root "${_nr}" "${YARAMFS_CFG_INIT}"
+fi
+
 hook_fail_shell
