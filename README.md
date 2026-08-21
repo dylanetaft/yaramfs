@@ -173,3 +173,32 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 1. Write `hooks/myhook.sh` with `prepare()` / `boot()` and end with `prepare_or_boot "$@"`.
 2. Symlink from `config/NN-name.sh` (use `NN-prepare-…` if it should not run at boot in the guest).
 3. Source `hooks/shared/head.sh`; use `die`, `default_value`, `export_cfg`, `install_binary` as needed.
+
+## installkernel / kernel-install
+yaramfs can act as the **initrd generator** for Gentoo `installkernel` and systemd `kernel-install`. It only builds `initrd` into the installer's staging area; it does **not** call `ukify` or choose the final boot path. installkernel (or a separate `ukify` plugin when `uki_generator=ukify`) installs the staged file as e.g. `/boot/initramfs-$ver.img` or wraps it in a UKI.
+
+### Install
+```sh
+# tree (default path used by the example conf)
+cp -a . /opt/yaramfs
+
+# systemd kernel-install (USE=systemd on installkernel)
+install -m755 /opt/yaramfs/scripts/installkernel/52-yaramfs.install /etc/kernel/install.d/52-yaramfs.install
+
+# Gentoo traditional installkernel (preinst hooks)
+install -m755 /opt/yaramfs/scripts/installkernel/52-yaramfs.install /etc/kernel/preinst.d/52-yaramfs.install
+
+# select generator + UKI (drop-in). See scripts/installkernel/install.conf
+mkdir -p /etc/kernel/install.conf.d
+install -m644 /opt/yaramfs/scripts/installkernel/install.conf /etc/kernel/install.conf.d/yaramfs.conf
+```
+Requires installkernel with UKI/ukify support (e.g. USE flags `uki` `ukify` on Gentoo) so the ukify plugin is present. Adjust `yaramfs_root=` in the conf if the tree is not at `/opt/yaramfs`. Override at runtime with `YARAMFS_ROOT` if needed.
+
+Note: `yaramfs_root` is read by the yaramfs plugin from conf/drop-ins; installkernel does not pass custom keys to plugins.
+
+### What the plugin does
+On `add` / preinst it runs:
+```sh
+YARAMFS_CFG_KERNEL_VERSION=$ver YARAMFS_CFG_OUT_CPIO=$STAGING/initrd $yaramfs_root/prepare.sh
+```
+`YARAMFS_CFG_KERNEL` is unset so the qemu hook is skipped. Staging is `${KERNEL_INSTALL_STAGING_AREA}` (systemd) or `${INSTALLKERNEL_STAGING_AREA}` (Gentoo).

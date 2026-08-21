@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# yaramfs initramfs generator plugin for installkernel / kernel-install
+#
+# Install one or both of:
+#   Gentoo traditional installkernel:
+#     /etc/kernel/preinst.d/52-yaramfs.install   (or /usr/lib/kernel/preinst.d/)
+#   systemd kernel-install:
+#     /etc/kernel/install.d/52-yaramfs.install   (or /usr/lib/kernel/install.d/)
+#
+# Select with install.conf (or a drop-in):
+#   initrd_generator=yaramfs
+#   yaramfs_root=/opt/yaramfs   # optional; default /opt/yaramfs
+#
+# yaramfs_root is not an installkernel-native key — this plugin reads it from
+# install.conf / install.conf.d itself (or from YARAMFS_ROOT in the environment).
+#
+# This plugin only builds an initrd into the staging area. installkernel (or
+# a separate ukify plugin when uki_generator=ukify) copies it to the final
+# boot path and optionally wraps it in a UKI. Do not call ukify here.
+#
+# Staging path (passed in by the installer):
+#   Gentoo:  ${INSTALLKERNEL_STAGING_AREA}/initrd
+#   systemd: ${KERNEL_INSTALL_STAGING_AREA}/initrd
+
+set -euo pipefail
+
+die() {
+	echo "yaramfs: $*" >&2
+	exit 1
+}
+
+einfo() {
+	if [[ ${INSTALLKERNEL_VERBOSE:-0} == 1 || ${KERNEL_INSTALL_VERBOSE:-0} -gt 0 ]]; then
+		echo "yaramfs: $*" >&2
+	fi
+}
+
+# Resolve path to yaramfs (directory containing prepare.sh).
+# Prefer YARAMFS_ROOT, then yaramfs_root= in install.conf / drop-ins, else /opt/yaramfs.
+find_yaramfs_root() {
+	local conf_root candidate conf dropin
+
+	if [[ -n ${YARAMFS_ROOT:-} ]]; then
+		printf '%s\n' "${YARAMFS_ROOT}"
+		return 0
+	fi
+
+	conf_root="${INSTALLKERNEL_CONF_ROOT:-${KERNEL_INSTALL_CONF_ROOT:-/etc/kernel}}"
+	for conf in \
+		"${conf_root}/install.conf" \
+		/etc/kernel/install.conf \
+		/run/kernel/install.conf \
+		/usr/local/lib/kernel/install.conf \
+		/usr/lib/kernel/install.conf
+	do
+		[[ -f ${conf} ]] || continue
+		candidate=$(grep -E '^[[:space:]]*yaramfs_root=' "${conf}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'")
+		if [[ -n ${candidate} ]]; then
+			printf '%s\n' "${candidate}"
+			return 0
+		fi
+	done
+
+	for dropin in \
+		"${conf_root}"/install.conf.d/*.conf \
+		/etc/kernel/install.conf.d/*.conf \
+		/usr/lib/kernel/install.conf.d/*.conf
+	do
+		[[ -f ${dropin} ]] || continue
+		candidate=$(grep -E '^[[:space:]]*yaramfs_root=' "${dropin}" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]"'"'")
+		if [[ -n ${candidate} ]]; then
+			printf '%s\n' "${candidate}"
+			return 0
+		fi
+	done
+
+	printf '%s\n' /opt/yaramfs
+}
+
+build_initrd() {
+	local ver=$1
+	local staging=$2
+	local root prepare out
+
+	[[ -n ${ver} ]] || die "kernel version is empty"
+	[[ -n ${staging} ]] || die "staging area is empty"
+	[[ -d ${staging} ]] || die "staging area is not a directory: ${staging}"
+
+	root=$(find_yaramfs_root)
+	prepare="${root}/prepare.sh"
+	[[ -x ${prepare} ]] || die "prepare.sh not found or not executable: ${prepare}"
+
+	out="${staging}/initrd"
+	einfo "building initramfs for ${ver} -> ${out}"
+
+	# KERNEL / YARAMFS_CFG_KERNEL left unset so prepare-qemu is skipped.
+	export YARAMFS_CFG_KERNEL_VERSION="${ver}"
+	export YARAMFS_CFG_OUT_CPIO="${out}"
+
+	if ! "${prepare}"; then
+		die "prepare.sh failed"
+	fi
+
+	[[ -f ${out} ]] || die "initrd not created: ${out}"
+	einfo "created ${out}"
+}
+
+# --- systemd kernel-install API ---------------------------------------------
+#   add|remove VERSION ENTRY_DIR_ABS KERNEL_IMAGE [INITRD...]
+# Env: KERNEL_INSTALL_STAGING_AREA, KERNEL_INSTALL_INITRD_GENERATOR, ...
+
+run_systemd() {
+	local command=${1:-}
+	local ver=${2:-}
+	# $3 entry dir unused for generation
+	# $4 kernel image unused
+
+	case "${command}" in
+	add)
+		# If caller already passed initrd files, do not regenerate.
+		if [[ ${#} -gt 4 ]]; then
+			einfo "initrd provided on command line, skipping"
+			exit 0
+		fi
+		if [[ ${KERNEL_INSTALL_IMAGE_TYPE:-} == uki ]]; then
+			einfo "kernel image is already a UKI, skipping"
+			exit 0
+		fi
+		# Match dracut's systemd plugin: only run when selected.
+		if [[ ${KERNEL_INSTALL_INITRD_GENERATOR:-} != yaramfs ]]; then
+			einfo "initrd_generator=${KERNEL_INSTALL_INITRD_GENERATOR:-}, skipping"
+			exit 0
+		fi
+		build_initrd "${ver}" "${KERNEL_INSTALL_STAGING_AREA:?KERNEL_INSTALL_STAGING_AREA unset}"
+		;;
+	remove)
+		# Entry directory / staged files are cleaned by kernel-install itself.
+		exit 0
+		;;
+	*)
+		exit 0
+		;;
+	esac
+}
+
+# --- Gentoo traditional installkernel preinst API ---------------------------
+#   VERSION KERNEL_IMAGE
+# Env: INSTALLKERNEL_STAGING_AREA, INSTALLKERNEL_INITRD_GENERATOR, ...
+
+run_gentoo_preinst() {
+	local ver=${1:-}
+	# $2 kernel image unused for initrd-only generation
+
+	# Match dracut's Gentoo plugin: run unless another generator is selected.
+	if [[ -n ${INSTALLKERNEL_INITRD_GENERATOR:-} && ${INSTALLKERNEL_INITRD_GENERATOR} != yaramfs ]]; then
+		einfo "initrd_generator=${INSTALLKERNEL_INITRD_GENERATOR}, skipping"
+		exit 0
+	fi
+
+	build_initrd "${ver}" "${INSTALLKERNEL_STAGING_AREA:?INSTALLKERNEL_STAGING_AREA unset}"
+}
+
+# Detect which installer invoked us.
+if [[ -n ${KERNEL_INSTALL_STAGING_AREA:-} ]]; then
+	run_systemd "$@"
+elif [[ -n ${INSTALLKERNEL_STAGING_AREA:-} ]]; then
+	run_gentoo_preinst "$@"
+else
+	die "no staging area set (KERNEL_INSTALL_STAGING_AREA or INSTALLKERNEL_STAGING_AREA)"
+fi
+
+exit 0
