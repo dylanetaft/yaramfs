@@ -95,7 +95,7 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
      - Resolves deps with busybox modprobe -D, copies .ko into build, runs depmod
      - Writes boot list to `etc/yaramfs-modules` in the image
   - Boot
-     - modprobe each name in `/etc/yaramfs-modules`
+     - modprobe each name in `/etc/yaramfs-modules` (warn and continue on failure)
 
 ### boot-network-ibft
 ##### Parameters

@@ -17,7 +17,12 @@ boot() {
   [ -f /etc/yaramfs-modules ] || return 0
   while read -r m || [ -n "${m}" ]; do
     [ -n "${m}" ] || continue
-    modprobe "${m}" || die ${LINENO} "modprobe ${m} failed"
+    # Soft-fail: list may include host-autodetected drivers (e.g. virtio from a
+    # VM build) that are absent or irrelevant on this machine. Needed hardware
+    # still fails later (network/iscsi/root) with a clearer error.
+    if ! modprobe "${m}"; then
+      echo "modules: modprobe ${m} failed (continuing)" >&2
+    fi
   done < /etc/yaramfs-modules
 }
 
