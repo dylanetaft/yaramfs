@@ -1,0 +1,102 @@
+#!/bin/bash
+# kernel-install plugin for yaramfs
+# Installs to: /etc/kernel/install.d/50-yaramfs.install
+#
+# Called by kernel-install with:
+#   add    KERNEL_VERSION BOOT_DIR KERNEL_IMAGE
+#   remove KERNEL_VERSION BOOT_DIR
+
+set -e
+
+ACTION="$1"
+KERNEL_VERSION="$2"
+BOOT_DIR="$3"
+KERNEL_IMAGE="$4"
+
+# Read yaramfs_root from install.conf
+CONF_DIR="${KERNEL_INSTALL_CONF_ROOT:-/etc/kernel}"
+YARAMFS_ROOT=$(grep '^yaramfs_root=' "${CONF_DIR}/install.conf" 2>/dev/null | cut -d= -f2-)
+
+if [ -z "${YARAMFS_ROOT}" ]; then
+    echo "yaramfs: yaramfs_root not set in ${CONF_DIR}/install.conf" >&2
+    exit 1
+fi
+
+if [ ! -d "${YARAMFS_ROOT}" ]; then
+    echo "yaramfs: yaramfs_root directory not found: ${YARAMFS_ROOT}" >&2
+    exit 1
+fi
+
+case "${ACTION}" in
+    add)
+        if [ -z "${KERNEL_VERSION}" ] || [ -z "${BOOT_DIR}" ] || [ -z "${KERNEL_IMAGE}" ]; then
+            echo "yaramfs: add requires VERSION BOOT_DIR IMAGE" >&2
+            exit 1
+        fi
+
+        INITRD="${BOOT_DIR}/initrd"
+        UKI="${BOOT_DIR}/linux.efi"
+
+        echo "yaramfs: building initramfs for ${KERNEL_VERSION}" >&2
+
+        # Run prepare.sh to build initramfs
+        # KERNEL is left unset so qemu hook is skipped
+        export YARAMFS_CFG_KERNEL_VERSION="${KERNEL_VERSION}"
+        export YARAMFS_CFG_OUT_CPIO="${INITRD}"
+
+        if ! "${YARAMFS_ROOT}/prepare.sh"; then
+            echo "yaramfs: prepare.sh failed" >&2
+            exit 1
+        fi
+
+        if [ ! -f "${INITRD}" ]; then
+            echo "yaramfs: initrd not created: ${INITRD}" >&2
+            exit 1
+        fi
+
+        echo "yaramfs: building UKI with ukify" >&2
+
+        # Build UKI using ukify
+        # cmdline comes from /etc/kernel/cmdline if it exists
+        UKIFY_ARGS=(
+            build
+            --linux="${KERNEL_IMAGE}"
+            --initrd="${INITRD}"
+            --output="${UKI}"
+        )
+
+        if [ -f /etc/kernel/cmdline ]; then
+            UKIFY_ARGS+=(--cmdline="@/etc/kernel/cmdline")
+        fi
+
+        if ! ukify "${UKIFY_ARGS[@]}"; then
+            echo "yaramfs: ukify failed" >&2
+            exit 1
+        fi
+
+        if [ ! -f "${UKI}" ]; then
+            echo "yaramfs: UKI not created: ${UKI}" >&2
+            exit 1
+        fi
+
+        echo "yaramfs: installed ${UKI}" >&2
+        ;;
+
+    remove)
+        if [ -z "${KERNEL_VERSION}" ] || [ -z "${BOOT_DIR}" ]; then
+            echo "yaramfs: remove requires VERSION BOOT_DIR" >&2
+            exit 1
+        fi
+
+        rm -f "${BOOT_DIR}/initrd"
+        rm -f "${BOOT_DIR}/linux.efi"
+        echo "yaramfs: removed ${BOOT_DIR}/initrd and ${BOOT_DIR}/linux.efi" >&2
+        ;;
+
+    *)
+        echo "yaramfs: unknown action: ${ACTION}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
