@@ -93,9 +93,9 @@ build_initrd() {
 	out="${staging}/initrd"
 	einfo "building initramfs for ${ver} -> ${out}"
 
-	# KERNEL / YARAMFS_CFG_KERNEL left unset so prepare-qemu is skipped.
-	export YARAMFS_CFG_KERNEL_VERSION="${ver}"
-	export YARAMFS_CFG_OUT_CPIO="${out}"
+	# KERNEL / YARAMFS_CFG_PREPARE_KERNEL left unset so prepare-qemu is skipped.
+	export YARAMFS_CFG_PREPARE_KERNEL_VERSION="${ver}"
+	export YARAMFS_CFG_PREPARE_OUT_CPIO="${out}"
 
 	if ! "${prepare}"; then
 		die "prepare.sh failed"

@@ -2,13 +2,13 @@
 . hooks/shared/head.sh
 
 prepare() {
-  default_value YARAMFS_CFG_OUT_CPIO "out/initramfs.cpio.gz" ${LINENO}
-  # Prefer pigz (parallel) when on PATH; else gzip. Override with YARAMFS_CFG_P_GZIP.
-  default_value YARAMFS_CFG_P_GZIP "$(command -v pigz || command -v gzip)" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_OUT_CPIO "out/initramfs.cpio.gz" ${LINENO}
+  # Prefer pigz (parallel) when on PATH; else gzip. Override with YARAMFS_CFG_PREPARE_GZIP.
+  default_value YARAMFS_CFG_PREPARE_GZIP "$(command -v pigz || command -v gzip)" ${LINENO}
 
-  BUILD_DIR=${YARAMFS_CFG_PREP_BUILD_DIR}
-  OUT=${YARAMFS_CFG_OUT_CPIO}
-  GZIP=${YARAMFS_CFG_P_GZIP}
+  BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
+  OUT=${YARAMFS_CFG_PREPARE_OUT_CPIO}
+  GZIP=${YARAMFS_CFG_PREPARE_GZIP}
 
   if [ ! -x "${BUILD_DIR}/init" ]; then
     die ${LINENO} "missing executable ${BUILD_DIR}/init (base prepare must run first)"

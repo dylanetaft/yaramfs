@@ -2,10 +2,10 @@
 . hooks/shared/head.sh
 
 prepare() {
-  default_value YARAMFS_CFG_P_BUSYBOX_PATH "$(which busybox)" ${LINENO}
-  default_value YARAMFS_CFG_P_PROOT "$(which proot)" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_BUSYBOX_PATH "$(which busybox)" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_PROOT "$(which proot)" ${LINENO}
 
-  BUILD_DIR=${YARAMFS_CFG_PREP_BUILD_DIR}
+  BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
 
   rm -rf "${BUILD_DIR}"
   mkdir "${BUILD_DIR}"
@@ -27,9 +27,9 @@ prepare() {
   mkdir -p "${BUILD_DIR}/dev/pts"
   mkdir -p "${BUILD_DIR}/hooks"
 
-  install -m 0755 -D "${YARAMFS_CFG_P_BUSYBOX_PATH}" "${BUILD_DIR}/bin/busybox"
+  install -m 0755 -D "${YARAMFS_CFG_PREPARE_BUSYBOX_PATH}" "${BUILD_DIR}/bin/busybox"
   # Create applet symlinks (including bin/sh) inside the build root.
-  LD_PRELOAD= "${YARAMFS_CFG_P_PROOT}" -r "${BUILD_DIR}" -w / /bin/busybox --install -s /bin \
+  LD_PRELOAD= "${YARAMFS_CFG_PREPARE_PROOT}" -r "${BUILD_DIR}" -w / /bin/busybox --install -s /bin \
     || die ${LINENO} "proot busybox --install failed"
   [ -x "${BUILD_DIR}/bin/sh" ] \
     || die ${LINENO} "bin/sh missing after busybox --install (init shebang needs it)"

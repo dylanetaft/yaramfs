@@ -2,13 +2,13 @@
 . hooks/shared/head.sh
 
 prepare() {
-  default_value YARAMFS_CFG_KERNEL_VERSION "$(uname -r)" ${LINENO}
-  default_value YARAMFS_CFG_MODULES_DIR "/lib/modules/${YARAMFS_CFG_KERNEL_VERSION}" ${LINENO}
-  default_value YARAMFS_CFG_P_BUSYBOX_PATH "$(which busybox)" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_KERNEL_VERSION "$(uname -r)" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_MODULES_DIR "/lib/modules/${YARAMFS_CFG_PREPARE_KERNEL_VERSION}" ${LINENO}
+  default_value YARAMFS_CFG_PREPARE_BUSYBOX_PATH "$(which busybox)" ${LINENO}
 
   # Roots: optional explicit list + ADDL from earlier hooks (network, input, iscsi, …).
   # shellcheck disable=SC2086
-  set -- ${YARAMFS_CFG_MODULES} ${YARAMFS_CFG_MODULES_ADDL}
+  set -- ${YARAMFS_CFG_PREPARE_MODULES} ${YARAMFS_CFG_PREPARE_MODULES_ADDL}
 
   ensure_modules "$@"
 }
@@ -31,16 +31,16 @@ boot() {
 # build tree, write boot roots to $BUILD_DIR/etc/yaramfs-modules, depmod if needed.
 # Builtin/missing roots are skipped (-q yields no insmod lines). Missing .ko files
 # are caught at copy time.
-# Caller must set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR,
-# YARAMFS_CFG_P_BUSYBOX_PATH.
+# Caller must set YARAMFS_CFG_PREPARE_KERNEL_VERSION, YARAMFS_CFG_PREPARE_MODULES_DIR,
+# YARAMFS_CFG_PREPARE_BUSYBOX_PATH.
 ensure_modules() {
-  _em_kver=${YARAMFS_CFG_KERNEL_VERSION}
-  _em_moddir=${YARAMFS_CFG_MODULES_DIR}
-  _em_bb=${YARAMFS_CFG_P_BUSYBOX_PATH}
-  _em_build=${YARAMFS_CFG_PREP_BUILD_DIR}
+  _em_kver=${YARAMFS_CFG_PREPARE_KERNEL_VERSION}
+  _em_moddir=${YARAMFS_CFG_PREPARE_MODULES_DIR}
+  _em_bb=${YARAMFS_CFG_PREPARE_BUSYBOX_PATH}
+  _em_build=${YARAMFS_CFG_PREPARE_BUILD_DIR}
 
   if [ -z "${_em_kver}" ] || [ -z "${_em_moddir}" ] || [ -z "${_em_bb}" ]; then
-    die ${LINENO} "ensure_modules: set YARAMFS_CFG_KERNEL_VERSION, YARAMFS_CFG_MODULES_DIR, YARAMFS_CFG_P_BUSYBOX_PATH first"
+    die ${LINENO} "ensure_modules: set YARAMFS_CFG_PREPARE_KERNEL_VERSION, YARAMFS_CFG_PREPARE_MODULES_DIR, YARAMFS_CFG_PREPARE_BUSYBOX_PATH first"
   fi
   if [ ! -d "${_em_moddir}" ]; then
     die ${LINENO} "modules dir not found: ${_em_moddir}"

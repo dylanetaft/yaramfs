@@ -12,8 +12,8 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
 - Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
-- Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_MODULES_ADDL`).
-- Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREP_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
+- Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_PREPARE_MODULES_ADDL`).
+- Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREPARE_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
 
 ## Build
 ```sh
@@ -21,8 +21,8 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 ```
 Optional env overrides (examples):
 ```sh
-YARAMFS_CFG_MODULES="foo bar" ./prepare.sh
-YARAMFS_CFG_KERNEL=/path/to/Image YARAMFS_CFG_QEMU_APPEND="console=ttyAMA0 rdinit=/init root=UUID=..." ./prepare.sh
+YARAMFS_CFG_PREPARE_MODULES="foo bar" ./prepare.sh
+YARAMFS_CFG_PREPARE_KERNEL=/path/to/Image YARAMFS_CFG_PREPARE_QEMU_APPEND="console=ttyAMA0 rdinit=/init root=UUID=..." ./prepare.sh
 ```
 Mininally required host tools: busybox, proot, lddtree, cpio, gzip/pigz 
 
@@ -31,9 +31,9 @@ Order below matches a typical `config/` layout (00 → 99).
 
 ### base
 ##### Parameters
- - YARAMFS_CFG_P_BUSYBOX_PATH
+ - YARAMFS_CFG_PREPARE_BUSYBOX_PATH
    - For prepare, specifies path to busybox
- - YARAMFS_CFG_P_PROOT
+ - YARAMFS_CFG_PREPARE_PROOT
    - Specifies path to proot binary
 ##### Phases
   - Prepare
@@ -44,23 +44,23 @@ Order below matches a typical `config/` layout (00 → 99).
 
 ### prepare-network
 ##### Parameters
- - YARAMFS_CFG_NETWORK_MODULES
-   - Override which modules in prepare phase are inserted into image.  Disables autodetection.  If you want to append modules, use YARAMFS_CFG_MODULES_ADDL.
+ - YARAMFS_CFG_PREPARE_NETWORK_MODULES
+   - Override which modules in prepare phase are inserted into image.  Disables autodetection.  If you want to append modules, use YARAMFS_CFG_PREPARE_MODULES_ADDL.
    - Unset = from lsmod, keep names whose modinfo path contains `/net/`.  Set empty = no NIC modules from this hook (8021q is still added).
 ##### Phases
   - Prepare
-     - Collects network modules (or uses override), always adds 8021q, appends to YARAMFS_CFG_MODULES_ADDL
+     - Collects network modules (or uses override), always adds 8021q, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
   - Boot
      - No-op (drivers are loaded by modules hook)
 
 ### prepare-input
 ##### Parameters
- - YARAMFS_CFG_INPUT_MODULES
+ - YARAMFS_CFG_PREPARE_INPUT_MODULES
    - Override input/hid modules for the image.  Disables autodetection.  Empty = none.
    - Unset = from lsmod, keep names whose modinfo path contains `/input/` or `/hid/`.
 ##### Phases
   - Prepare
-     - Collects input modules, appends to YARAMFS_CFG_MODULES_ADDL
+     - Collects input modules, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
   - Boot
      - No-op
 
@@ -68,11 +68,11 @@ Order below matches a typical `config/` layout (00 → 99).
 ##### Requires
 Host open-iscsi package installed (iscsistart, iscsiadm)
 ##### Parameters
- - YARAMFS_CFG_P_ISCSITART
+ - YARAMFS_CFG_PREPARE_ISCSITART
    - Path to host iscsistart (default: `which iscsistart`)
 ##### Phases
   - Prepare
-     - Appends iscsi kernel modules to YARAMFS_CFG_MODULES_ADDL
+     - Appends iscsi kernel modules to YARAMFS_CFG_PREPARE_MODULES_ADDL
      - install_binary iscsistart (+ shared libs) into the image
      - Copies `/etc/iscsi/iscsid.conf` when readable
   - Boot
@@ -80,15 +80,15 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 
 ### modules
 ##### Parameters
- - YARAMFS_CFG_MODULES
+ - YARAMFS_CFG_PREPARE_MODULES
    - Explicit module names (space-separated) always considered for the image
- - YARAMFS_CFG_MODULES_ADDL
+ - YARAMFS_CFG_PREPARE_MODULES_ADDL
    - Extra names accumulated by earlier prepare hooks (export_cfg).  You can also set this yourself to append.
- - YARAMFS_CFG_KERNEL_VERSION
+ - YARAMFS_CFG_PREPARE_KERNEL_VERSION
    - Kernel version for module tree (default: `uname -r`)
- - YARAMFS_CFG_MODULES_DIR
-   - Host modules directory (default: `/lib/modules/$YARAMFS_CFG_KERNEL_VERSION`)
- - YARAMFS_CFG_P_BUSYBOX_PATH
+ - YARAMFS_CFG_PREPARE_MODULES_DIR
+   - Host modules directory (default: `/lib/modules/$YARAMFS_CFG_PREPARE_KERNEL_VERSION`)
+ - YARAMFS_CFG_PREPARE_BUSYBOX_PATH
    - busybox used for `modprobe -D` / `depmod` during prepare
 ##### Phases
   - Prepare
@@ -99,9 +99,9 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 
 ### boot-network-ibft
 ##### Parameters
- - YARAMFS_CFG_IBFT_DIR
+ - YARAMFS_CFG_BOOT_IBFT_DIR
    - iBFT sysfs root (default: `/sys/firmware/ibft`)
- - YARAMFS_CFG_IBFT_\<N\>_MAC / _IP / _PREFIX / _NETMASK / _VLAN
+ - YARAMFS_CFG_BOOT_IBFT_\<N\>_MAC / _IP / _PREFIX / _NETMASK / _VLAN
    - Optional per-ethernet overrides (N = index from `ethernetN`).  Unset fields fall back to firmware sysfs values.
 ##### Phases
   - Prepare
@@ -112,7 +112,7 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 
 ### boot-iscsi
 ##### Parameters
- - YARAMFS_CFG_ISCSI_TIMEOUT
+ - YARAMFS_CFG_BOOT_ISCSI_TIMEOUT
    - Seconds before killing hung iscsistart -b (default: 60)
 ##### Phases
   - Prepare
@@ -125,23 +125,23 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
  - (mostly from kernel cmdline, not env)
    - root= — `/dev/…`, `UUID=…`, or `LABEL=…` (busybox findfs; no PARTUUID/PARTLABEL)
    - rootfstype=, rootflags= (default flags: ro), rootdelay= (seconds to wait, default 30), init=
- - YARAMFS_CFG_NEWROOT_MNT
+ - YARAMFS_CFG_BOOT_NEWROOT_MNT
    - Mount point inside initramfs (default: `/mnt/root`)
- - YARAMFS_CFG_ROOT / YARAMFS_CFG_ROOTFSTYPE / YARAMFS_CFG_ROOTFLAGS / YARAMFS_CFG_ROOTDELAY / YARAMFS_CFG_INIT
+ - YARAMFS_CFG_BOOT_ROOT / YARAMFS_CFG_BOOT_ROOTFSTYPE / YARAMFS_CFG_BOOT_ROOTFLAGS / YARAMFS_CFG_BOOT_ROOTDELAY / YARAMFS_CFG_BOOT_INIT
    - Filled from cmdline during boot; INIT defaults to `/sbin/init` if unset
 ##### Phases
   - Prepare
      - No-op (uses busybox findfs already in the image)
   - Boot
      - Parse cmdline, wait up to rootdelay for the device, mount on NEWROOT_MNT
-     - export_cfg YARAMFS_CFG_NEWROOT and YARAMFS_CFG_INIT for PID 1
+     - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
  - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root`.  If nothing mounted root, drops to a rescue shell.
 
 ### prepare-cpio
 ##### Parameters
- - YARAMFS_CFG_OUT_CPIO
+ - YARAMFS_CFG_PREPARE_OUT_CPIO
    - Output path (default: `out/initramfs.cpio.gz`)
- - YARAMFS_CFG_P_GZIP
+ - YARAMFS_CFG_PREPARE_GZIP
    - Compressor (default: pigz if present, else gzip)
 ##### Phases
   - Prepare
@@ -151,17 +151,17 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 
 ### prepare-qemu
 ##### Parameters
- - YARAMFS_CFG_KERNEL
+ - YARAMFS_CFG_PREPARE_KERNEL
    - Kernel image path.  Unset = skip qemu (image-only prepare).
- - YARAMFS_CFG_OUT_CPIO
+ - YARAMFS_CFG_PREPARE_OUT_CPIO
    - Initrd path (default: `out/initramfs.cpio.gz`; must exist from prepare-cpio)
- - YARAMFS_CFG_QEMU_MACHINE
+ - YARAMFS_CFG_PREPARE_QEMU_MACHINE
    - Default: virt
- - YARAMFS_CFG_QEMU_CPU
+ - YARAMFS_CFG_PREPARE_QEMU_CPU
    - Default: max
- - YARAMFS_CFG_QEMU_MEM
+ - YARAMFS_CFG_PREPARE_QEMU_MEM
    - Default: 1024
- - YARAMFS_CFG_QEMU_APPEND
+ - YARAMFS_CFG_PREPARE_QEMU_APPEND
    - Kernel cmdline (default: `console=ttyAMA0 rdinit=/init panic=1`).  Add root=UUID=… etc. here for real root tests.
 ##### Phases
   - Prepare
@@ -199,6 +199,6 @@ Note: `yaramfs_root` is read by the yaramfs plugin from conf/drop-ins; installke
 ### What the plugin does
 On `add` / preinst it runs:
 ```sh
-YARAMFS_CFG_KERNEL_VERSION=$ver YARAMFS_CFG_OUT_CPIO=$STAGING/initrd $yaramfs_root/prepare.sh
+YARAMFS_CFG_PREPARE_KERNEL_VERSION=$ver YARAMFS_CFG_PREPARE_OUT_CPIO=$STAGING/initrd $yaramfs_root/prepare.sh
 ```
-`YARAMFS_CFG_KERNEL` is unset so the qemu hook is skipped. Staging is `${KERNEL_INSTALL_STAGING_AREA}` (systemd) or `${INSTALLKERNEL_STAGING_AREA}` (Gentoo).
+`YARAMFS_CFG_PREPARE_KERNEL` is unset so the qemu hook is skipped. Staging is `${KERNEL_INSTALL_STAGING_AREA}` (systemd) or `${INSTALLKERNEL_STAGING_AREA}` (Gentoo).

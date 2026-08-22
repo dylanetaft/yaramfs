@@ -11,9 +11,9 @@ mkdir -p /tmp
 # Boot hooks run as children; rescue shell / switch_root must stay PID 1.
 for_each_hook boot || echo "yaramfs: boot hooks failed" >&2
 
-if [ -n "${YARAMFS_CFG_NEWROOT}" ]; then
-  default_value YARAMFS_CFG_INIT "/sbin/init" ${LINENO}
-  _nr=${YARAMFS_CFG_NEWROOT}
+if [ -n "${YARAMFS_CFG_BOOT_NEWROOT}" ]; then
+  default_value YARAMFS_CFG_BOOT_INIT "/sbin/init" ${LINENO}
+  _nr=${YARAMFS_CFG_BOOT_NEWROOT}
 
   # Hand off virtual filesystems so the real root keeps them.
   for _d in proc sys dev run; do
@@ -24,8 +24,8 @@ if [ -n "${YARAMFS_CFG_NEWROOT}" ]; then
     fi
   done
 
-  echo "yaramfs: switch_root ${_nr} ${YARAMFS_CFG_INIT}" >&2
-  exec switch_root "${_nr}" "${YARAMFS_CFG_INIT}"
+  echo "yaramfs: switch_root ${_nr} ${YARAMFS_CFG_BOOT_INIT}" >&2
+  exec switch_root "${_nr}" "${YARAMFS_CFG_BOOT_INIT}"
 fi
 
 hook_fail_shell

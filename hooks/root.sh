@@ -12,19 +12,19 @@ _root_parse_token() {
   _tok=$1
   case "${_tok}" in
     root=*)
-      YARAMFS_CFG_ROOT=${_tok#root=}
+      YARAMFS_CFG_BOOT_ROOT=${_tok#root=}
       ;;
     rootfstype=*)
-      YARAMFS_CFG_ROOTFSTYPE=${_tok#rootfstype=}
+      YARAMFS_CFG_BOOT_ROOTFSTYPE=${_tok#rootfstype=}
       ;;
     rootflags=*)
-      YARAMFS_CFG_ROOTFLAGS=${_tok#rootflags=}
+      YARAMFS_CFG_BOOT_ROOTFLAGS=${_tok#rootflags=}
       ;;
     rootdelay=*)
-      YARAMFS_CFG_ROOTDELAY=${_tok#rootdelay=}
+      YARAMFS_CFG_BOOT_ROOTDELAY=${_tok#rootdelay=}
       ;;
     init=*)
-      YARAMFS_CFG_INIT=${_tok#init=}
+      YARAMFS_CFG_BOOT_INIT=${_tok#init=}
       ;;
   esac
 }
@@ -76,7 +76,7 @@ _root_resolve() {
 # Wait until _root_resolve succeeds, up to rootdelay=N seconds (default 30).
 _root_wait_resolve() {
   _spec=$1
-  _delay=${YARAMFS_CFG_ROOTDELAY:-30}
+  _delay=${YARAMFS_CFG_BOOT_ROOTDELAY:-30}
   _n=0
   _dev=
 
@@ -100,46 +100,46 @@ _root_wait_resolve() {
 }
 
 boot() {
-  default_value YARAMFS_CFG_NEWROOT_MNT "/mnt/root" ${LINENO}
+  default_value YARAMFS_CFG_BOOT_NEWROOT_MNT "/mnt/root" ${LINENO}
 
   _root_parse_cmdline
 
-  if [ -z "${YARAMFS_CFG_ROOT}" ]; then
+  if [ -z "${YARAMFS_CFG_BOOT_ROOT}" ]; then
     echo "yaramfs: no root= on cmdline, skipping mount" >&2
     return 0
   fi
 
-  echo "yaramfs: root=${YARAMFS_CFG_ROOT}" >&2
+  echo "yaramfs: root=${YARAMFS_CFG_BOOT_ROOT}" >&2
 
-  _dev=$(_root_wait_resolve "${YARAMFS_CFG_ROOT}") \
-    || die ${LINENO} "root device not found: ${YARAMFS_CFG_ROOT}"
+  _dev=$(_root_wait_resolve "${YARAMFS_CFG_BOOT_ROOT}") \
+    || die ${LINENO} "root device not found: ${YARAMFS_CFG_BOOT_ROOT}"
 
   echo "yaramfs: resolved root -> ${_dev}" >&2
 
-  mkdir -p "${YARAMFS_CFG_NEWROOT_MNT}" \
-    || die ${LINENO} "mkdir ${YARAMFS_CFG_NEWROOT_MNT} failed"
+  mkdir -p "${YARAMFS_CFG_BOOT_NEWROOT_MNT}" \
+    || die ${LINENO} "mkdir ${YARAMFS_CFG_BOOT_NEWROOT_MNT} failed"
 
   # Kernel default is ro when rootflags= is absent.
-  default_if_unset YARAMFS_CFG_ROOTFLAGS "ro" ${LINENO}
-  [ -n "${YARAMFS_CFG_ROOTFLAGS}" ] || YARAMFS_CFG_ROOTFLAGS=ro
+  default_if_unset YARAMFS_CFG_BOOT_ROOTFLAGS "ro" ${LINENO}
+  [ -n "${YARAMFS_CFG_BOOT_ROOTFLAGS}" ] || YARAMFS_CFG_BOOT_ROOTFLAGS=ro
 
   _mnt_args=
-  if [ -n "${YARAMFS_CFG_ROOTFSTYPE}" ]; then
-    _mnt_args="-t ${YARAMFS_CFG_ROOTFSTYPE}"
+  if [ -n "${YARAMFS_CFG_BOOT_ROOTFSTYPE}" ]; then
+    _mnt_args="-t ${YARAMFS_CFG_BOOT_ROOTFSTYPE}"
   fi
   # shellcheck disable=SC2086
-  mount ${_mnt_args} -o "${YARAMFS_CFG_ROOTFLAGS}" "${_dev}" "${YARAMFS_CFG_NEWROOT_MNT}" \
-    || die ${LINENO} "mount ${_dev} on ${YARAMFS_CFG_NEWROOT_MNT} failed"
+  mount ${_mnt_args} -o "${YARAMFS_CFG_BOOT_ROOTFLAGS}" "${_dev}" "${YARAMFS_CFG_BOOT_NEWROOT_MNT}" \
+    || die ${LINENO} "mount ${_dev} on ${YARAMFS_CFG_BOOT_NEWROOT_MNT} failed"
 
-  default_value YARAMFS_CFG_INIT "/sbin/init" ${LINENO}
+  default_value YARAMFS_CFG_BOOT_INIT "/sbin/init" ${LINENO}
 
-  if [ ! -e "${YARAMFS_CFG_NEWROOT_MNT}${YARAMFS_CFG_INIT}" ]; then
-    die ${LINENO} "init not found on new root: ${YARAMFS_CFG_INIT}"
+  if [ ! -e "${YARAMFS_CFG_BOOT_NEWROOT_MNT}${YARAMFS_CFG_BOOT_INIT}" ]; then
+    die ${LINENO} "init not found on new root: ${YARAMFS_CFG_BOOT_INIT}"
   fi
 
-  YARAMFS_CFG_NEWROOT=${YARAMFS_CFG_NEWROOT_MNT}
-  export_cfg YARAMFS_CFG_NEWROOT YARAMFS_CFG_INIT
-  echo "yaramfs: mounted ${_dev} at ${YARAMFS_CFG_NEWROOT} (init=${YARAMFS_CFG_INIT})" >&2
+  YARAMFS_CFG_BOOT_NEWROOT=${YARAMFS_CFG_BOOT_NEWROOT_MNT}
+  export_cfg YARAMFS_CFG_BOOT_NEWROOT YARAMFS_CFG_BOOT_INIT
+  echo "yaramfs: mounted ${_dev} at ${YARAMFS_CFG_BOOT_NEWROOT} (init=${YARAMFS_CFG_BOOT_INIT})" >&2
 }
 
 prepare_or_boot "$@"

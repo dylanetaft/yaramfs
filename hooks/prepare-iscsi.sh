@@ -7,19 +7,19 @@
 ISCSI_MODULES="iscsi_boot_sysfs iscsi_ibft scsi_transport_iscsi libiscsi libiscsi_tcp iscsi_tcp"
 
 prepare() {
-  default_value YARAMFS_CFG_P_ISCSITART "$(which iscsistart)" ${LINENO}
-  BUILD_DIR=${YARAMFS_CFG_PREP_BUILD_DIR}
+  default_value YARAMFS_CFG_PREPARE_ISCSITART "$(which iscsistart)" ${LINENO}
+  BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
 
-  if [ ! -x "${YARAMFS_CFG_P_ISCSITART}" ]; then
-    die ${LINENO} "iscsistart not executable: ${YARAMFS_CFG_P_ISCSITART}"
+  if [ ! -x "${YARAMFS_CFG_PREPARE_ISCSITART}" ]; then
+    die ${LINENO} "iscsistart not executable: ${YARAMFS_CFG_PREPARE_ISCSITART}"
   fi
 
   # Parent runner sources export_cfg output after this hook process exits.
-  YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} ${ISCSI_MODULES}"
-  YARAMFS_CFG_MODULES_ADDL=${YARAMFS_CFG_MODULES_ADDL# }
-  export_cfg YARAMFS_CFG_MODULES_ADDL
+  YARAMFS_CFG_PREPARE_MODULES_ADDL="${YARAMFS_CFG_PREPARE_MODULES_ADDL} ${ISCSI_MODULES}"
+  YARAMFS_CFG_PREPARE_MODULES_ADDL=${YARAMFS_CFG_PREPARE_MODULES_ADDL# }
+  export_cfg YARAMFS_CFG_PREPARE_MODULES_ADDL
 
-  install_binary "${YARAMFS_CFG_P_ISCSITART}" /sbin/iscsistart
+  install_binary "${YARAMFS_CFG_PREPARE_ISCSITART}" /sbin/iscsistart
 
   mkdir -p "${BUILD_DIR}/var/lib/iscsi"
   mkdir -p "${BUILD_DIR}/etc/iscsi"

@@ -3,7 +3,7 @@ die() { echo "$0:$1 $2" >&2; exit 1; }
 
 # Defaults needed before default_value exists (and for runme / shared helpers).
 # Guest /init sets YARAMFS_CFG_CONFIG_DIR=/hooks before sourcing this file.
-: ${YARAMFS_CFG_PREP_BUILD_DIR:=build}
+: ${YARAMFS_CFG_PREPARE_BUILD_DIR:=build}
 : ${YARAMFS_CFG_CONFIG_DIR:=config}
 : ${YARAMFS_CFG_EXPORTS_FILE:=/tmp/yaramfs_exports}
 
@@ -112,7 +112,7 @@ for_each_hook() {
   rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
 
   # Children inherit these (defaults live in the runner shell otherwise).
-  export YARAMFS_CFG_PREP_BUILD_DIR YARAMFS_CFG_CONFIG_DIR YARAMFS_CFG_EXPORTS_FILE
+  export YARAMFS_CFG_PREPARE_BUILD_DIR YARAMFS_CFG_CONFIG_DIR YARAMFS_CFG_EXPORTS_FILE
 
   _feh_any=
   for _feh_name in $(list_hooks); do
@@ -151,7 +151,7 @@ for_each_hook() {
 install_binary() {
   _ib_src=$1
   _ib_dest=$2
-  _ib_build=${YARAMFS_CFG_PREP_BUILD_DIR}
+  _ib_build=${YARAMFS_CFG_PREPARE_BUILD_DIR}
 
   if [ -z "${_ib_src}" ] || [ -z "${_ib_dest}" ]; then
     die ${LINENO} "install_binary requires SRC and DEST"
@@ -164,8 +164,8 @@ install_binary() {
     *) die ${LINENO} "install_binary DEST must be absolute image path: ${_ib_dest}" ;;
   esac
 
-  default_value YARAMFS_CFG_P_LDDTREE "$(which lddtree)" ${LINENO}
-  _ib_lddtree=${YARAMFS_CFG_P_LDDTREE}
+  default_value YARAMFS_CFG_PREPARE_LDDTREE "$(which lddtree)" ${LINENO}
+  _ib_lddtree=${YARAMFS_CFG_PREPARE_LDDTREE}
   if [ ! -x "${_ib_lddtree}" ]; then
     die ${LINENO} "lddtree not executable: ${_ib_lddtree}"
   fi

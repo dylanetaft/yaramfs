@@ -2,7 +2,7 @@
 . hooks/shared/head.sh
 
 # Bring up NIC(s) from iBFT sysfs (/sys/firmware/ibft/ethernetN).
-# Per entry: firmware values → YARAMFS_CFG_IBFT_<N>_* via default_if_unset
+# Per entry: firmware values → YARAMFS_CFG_BOOT_IBFT_<N>_* via default_if_unset
 # (pre-set CFG wins), match MAC with ip/sysfs, rename to ibftN, optional VLAN,
 # then ip addr from iBFT. Config order: after modules, before boot-iscsi.
 
@@ -72,17 +72,17 @@ _ibft_apply_ethernet() {
   _fw_vlan=$(_ibft_trim "$(cat "${_eth}/vlan" 2>/dev/null)")
 
   # Firmware fills CFG only when unset; empty overrides stay empty.
-  default_if_unset "YARAMFS_CFG_IBFT_${_idx}_MAC" "${_fw_mac}" ${LINENO}
-  default_if_unset "YARAMFS_CFG_IBFT_${_idx}_IP" "${_fw_ip}" ${LINENO}
-  default_if_unset "YARAMFS_CFG_IBFT_${_idx}_PREFIX" "${_fw_prefix}" ${LINENO}
-  default_if_unset "YARAMFS_CFG_IBFT_${_idx}_NETMASK" "${_fw_mask}" ${LINENO}
-  default_if_unset "YARAMFS_CFG_IBFT_${_idx}_VLAN" "${_fw_vlan}" ${LINENO}
+  default_if_unset "YARAMFS_CFG_BOOT_IBFT_${_idx}_MAC" "${_fw_mac}" ${LINENO}
+  default_if_unset "YARAMFS_CFG_BOOT_IBFT_${_idx}_IP" "${_fw_ip}" ${LINENO}
+  default_if_unset "YARAMFS_CFG_BOOT_IBFT_${_idx}_PREFIX" "${_fw_prefix}" ${LINENO}
+  default_if_unset "YARAMFS_CFG_BOOT_IBFT_${_idx}_NETMASK" "${_fw_mask}" ${LINENO}
+  default_if_unset "YARAMFS_CFG_BOOT_IBFT_${_idx}_VLAN" "${_fw_vlan}" ${LINENO}
 
-  eval "_mac=\${YARAMFS_CFG_IBFT_${_idx}_MAC}"
-  eval "_ip=\${YARAMFS_CFG_IBFT_${_idx}_IP}"
-  eval "_prefix=\${YARAMFS_CFG_IBFT_${_idx}_PREFIX}"
-  eval "_mask=\${YARAMFS_CFG_IBFT_${_idx}_NETMASK}"
-  eval "_vlan=\${YARAMFS_CFG_IBFT_${_idx}_VLAN}"
+  eval "_mac=\${YARAMFS_CFG_BOOT_IBFT_${_idx}_MAC}"
+  eval "_ip=\${YARAMFS_CFG_BOOT_IBFT_${_idx}_IP}"
+  eval "_prefix=\${YARAMFS_CFG_BOOT_IBFT_${_idx}_PREFIX}"
+  eval "_mask=\${YARAMFS_CFG_BOOT_IBFT_${_idx}_NETMASK}"
+  eval "_vlan=\${YARAMFS_CFG_BOOT_IBFT_${_idx}_VLAN}"
 
   _mac=$(_ibft_norm_mac "${_mac}")
   _ip=$(_ibft_trim "${_ip}")
@@ -140,9 +140,9 @@ _ibft_apply_ethernet() {
 }
 
 boot() {
-  default_if_unset YARAMFS_CFG_IBFT_DIR "/sys/firmware/ibft" ${LINENO}
+  default_if_unset YARAMFS_CFG_BOOT_IBFT_DIR "/sys/firmware/ibft" ${LINENO}
 
-  _ibft_root=${YARAMFS_CFG_IBFT_DIR}
+  _ibft_root=${YARAMFS_CFG_BOOT_IBFT_DIR}
   if [ ! -d "${_ibft_root}" ]; then
     die ${LINENO} "iBFT not present: ${_ibft_root} (load iscsi_ibft first?)"
   fi

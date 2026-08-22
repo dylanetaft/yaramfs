@@ -1,17 +1,17 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# Host input drivers → YARAMFS_CFG_MODULES_ADDL for the modules hook.
+# Host input drivers → YARAMFS_CFG_PREPARE_MODULES_ADDL for the modules hook.
 # Default: lsmod names whose modinfo -n path contains "/input/" or "/hid/"
 # (e.g. …/drivers/input/…/hyperv_keyboard.ko, …/drivers/hid/hid-hyperv.ko).
 # ensure_modules pulls deps via modprobe -D. No root required.
-# Override: YARAMFS_CFG_INPUT_MODULES="usbhid atkbd" (empty = none).
+# Override: YARAMFS_CFG_PREPARE_INPUT_MODULES="usbhid atkbd" (empty = none).
 
 prepare() {
   _in_mods=
 
-  if eval "[ -n \"\${YARAMFS_CFG_INPUT_MODULES+x}\" ]"; then
-    _in_mods=${YARAMFS_CFG_INPUT_MODULES}
+  if eval "[ -n \"\${YARAMFS_CFG_PREPARE_INPUT_MODULES+x}\" ]"; then
+    _in_mods=${YARAMFS_CFG_PREPARE_INPUT_MODULES}
   else
     # NR>1: skip lsmod header.
     while read -r _in_name || [ -n "${_in_name}" ]; do
@@ -38,9 +38,9 @@ EOF
 
   if [ -n "${_in_mods}" ]; then
     echo "input: modules: ${_in_mods}" >&2
-    YARAMFS_CFG_MODULES_ADDL="${YARAMFS_CFG_MODULES_ADDL} ${_in_mods}"
-    YARAMFS_CFG_MODULES_ADDL=${YARAMFS_CFG_MODULES_ADDL# }
-    export_cfg YARAMFS_CFG_MODULES_ADDL
+    YARAMFS_CFG_PREPARE_MODULES_ADDL="${YARAMFS_CFG_PREPARE_MODULES_ADDL} ${_in_mods}"
+    YARAMFS_CFG_PREPARE_MODULES_ADDL=${YARAMFS_CFG_PREPARE_MODULES_ADDL# }
+    export_cfg YARAMFS_CFG_PREPARE_MODULES_ADDL
   else
     echo "input: no input modules (built-in, override empty, or none loaded)" >&2
   fi
