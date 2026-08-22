@@ -163,7 +163,15 @@
 #YARAMFS_CFG_PREPARE_CUSTOM_DIR=
 
 # =============================================================================
-# root
+# boot-force-debug
+# Non-empty → this boot hook dies; guest /init drops to recovery shell.
+# Leave unset/empty for normal boot (config/85-boot-force-debug.sh may stay linked).
+# =============================================================================
+
+#YARAMFS_CFG_BOOT_FORCE_DEBUG=1
+
+# =============================================================================
+# boot-root
 # Device selection is mostly kernel cmdline (root=, rootfstype=, rootflags=,
 # rootdelay=, init=). busybox findfs: /dev/…, UUID=…, LABEL=… (no PARTUUID).
 # These CFG vars can bake defaults; cmdline fills ROOT/ROOTFSTYPE/etc at boot.
@@ -179,7 +187,7 @@
 #YARAMFS_CFG_BOOT_ROOTDELAY=30
 #YARAMFS_CFG_BOOT_INIT=/sbin/init
 
-# Set by root hook after mount (export_cfg for PID 1); not typically set by hand:
+# Set by boot-root after mount (export_cfg for PID 1); not typically set by hand:
 #   YARAMFS_CFG_BOOT_NEWROOT
 
 # =============================================================================

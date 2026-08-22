@@ -135,7 +135,7 @@ Optional escape hatch: copy a host payload directory into the image and optional
      - Missing script = no-op
      - Script inherits `YARAMFS_CFG_*` and may `export_cfg` for later hooks
 
-### root
+### boot-root
 ##### Phases
   - Prepare
      - No-op (uses busybox findfs already in the image)
@@ -143,6 +143,15 @@ Optional escape hatch: copy a host payload directory into the image and optional
      - Parse cmdline (`root=`, `rootfstype=`, `rootflags=`, `rootdelay=`, `init=`), wait up to rootdelay for the device, mount on NEWROOT_MNT
      - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
   - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root`.  If nothing mounted root, drops to a rescue shell.
+
+### boot-force-debug
+Opt-in forced boot failure so guest `/init` drops to the recovery shell. Default config slot is after boot-root (85); renumber to stop earlier in the sequence.
+##### Phases
+  - Prepare
+     - No-op
+  - Boot
+     - If `YARAMFS_CFG_BOOT_FORCE_DEBUG` is non-empty: `die` (hook fails → recovery shell)
+     - Unset/empty: no-op (safe when the config symlink is left in place)
 
 ### prepare-cpio
 ##### Phases

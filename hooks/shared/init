@@ -9,7 +9,11 @@ mkdir -p /tmp
 
 . /hooks/shared/head.sh
 # Boot hooks run as children; rescue shell / switch_root must stay PID 1.
-for_each_hook boot || echo "yaramfs: boot hooks failed" >&2
+# Any boot hook failure → recovery shell (do not switch_root even if NEWROOT set).
+if ! for_each_hook boot; then
+  echo "yaramfs: boot hooks failed" >&2
+  hook_fail_shell
+fi
 
 if [ -n "${YARAMFS_CFG_BOOT_NEWROOT}" ]; then
   default_value YARAMFS_CFG_BOOT_INIT "/sbin/init" ${LINENO}
