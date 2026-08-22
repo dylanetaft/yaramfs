@@ -46,10 +46,10 @@ Order below matches a typical `config/` layout (00 → 99).
 ##### Parameters
  - YARAMFS_CFG_NETWORK_MODULES
    - Override which modules in prepare phase are inserted into image.  Disables autodetection.  If you want to append modules, use YARAMFS_CFG_MODULES_ADDL.
-   - Unset = autodetect NIC drivers from `/sys/class/net/*/device/driver`.  Set empty = no NIC modules from this hook (8021q is still added).
+   - Unset = from lsmod, keep names whose modinfo path contains `/net/`.  Set empty = no NIC modules from this hook (8021q is still added).
 ##### Phases
   - Prepare
-     - Detects network drivers in use (or uses override), always adds 8021q, appends to YARAMFS_CFG_MODULES_ADDL
+     - Collects network modules (or uses override), always adds 8021q, appends to YARAMFS_CFG_MODULES_ADDL
   - Boot
      - No-op (drivers are loaded by modules hook)
 

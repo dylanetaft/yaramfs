@@ -1,9 +1,10 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# Host NIC drivers → YARAMFS_CFG_MODULES_ADDL for the modules hook.
-# Default: unique driver basenames bound under /sys/class/net/*/device/driver
-# (skips lo and ifaces with no backing device, e.g. bare bridges).
+# Host network drivers → YARAMFS_CFG_MODULES_ADDL for the modules hook.
+# Default: lsmod names whose modinfo -n path contains "/net/"
+# (e.g. …/drivers/net/ethernet/…/igb.ko, …/net/8021q/8021q.ko).
+# ensure_modules pulls deps via modprobe -D. No root required.
 # Override: YARAMFS_CFG_NETWORK_MODULES="mlx5_core igb" (empty = none).
 
 prepare() {
@@ -12,23 +13,25 @@ prepare() {
   if eval "[ -n \"\${YARAMFS_CFG_NETWORK_MODULES+x}\" ]"; then
     _net_mods=${YARAMFS_CFG_NETWORK_MODULES}
   else
-    for _net_iface in /sys/class/net/*; do
-      [ -e "${_net_iface}" ] || continue
-      _net_name=${_net_iface##*/}
-      [ "${_net_name}" = "lo" ] && continue
+    # NR>1: skip lsmod header.
+    while read -r _net_name || [ -n "${_net_name}" ]; do
+      [ -n "${_net_name}" ] || continue
 
-      _net_drv_link="${_net_iface}/device/driver"
-      # Bound driver is a symlink; -e fails if the target is gone, -L is enough.
-      [ -L "${_net_drv_link}" ] || continue
+      _net_path=$(modinfo -n "${_net_name}" 2>/dev/null) || continue
+      [ -n "${_net_path}" ] || continue
 
-      _net_drv=$(basename "$(readlink -f "${_net_drv_link}" 2>/dev/null || readlink "${_net_drv_link}")")
-      [ -n "${_net_drv}" ] || continue
+      case "${_net_path}" in
+        */net/*) ;;
+        *) continue ;;
+      esac
 
       case " ${_net_mods} " in
-        *" ${_net_drv} "*) continue ;;
+        *" ${_net_name} "*) continue ;;
       esac
-      _net_mods="${_net_mods} ${_net_drv}"
-    done
+      _net_mods="${_net_mods} ${_net_name}"
+    done <<EOF
+$(lsmod | awk 'NR > 1 { print $1 }')
+EOF
   fi
 
   # Trim leading space from the loop accumulation.
@@ -45,7 +48,7 @@ prepare() {
     YARAMFS_CFG_MODULES_ADDL=${YARAMFS_CFG_MODULES_ADDL# }
     export_cfg YARAMFS_CFG_MODULES_ADDL
   else
-    echo "network: no NIC modules (built-in, override empty, or nothing bound)" >&2
+    echo "network: no NIC modules (built-in, override empty, or none loaded)" >&2
   fi
 }
 
