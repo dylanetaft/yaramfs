@@ -208,11 +208,13 @@ EOF
 # so we are putting in shared helper
 # We load variables from a script but don't want to 
 # clobber manually set ones - those will override config loaded ones
+# We only support single line environment variables
 yaramfs_preserve_env() {
-  for var in $(env); do
-    var_name=$(echo "${var}" | cut -d= -s -f1)
-    case "${var_name}" in
-      YARAMFS_CFG_*) ;; #we will preserve this
+  for var in $(set); do
+    case "${var}" in
+      YARAMFS_CFG_*)
+        var_name=$(echo "${var}" | cut -d= -s -f1)
+      ;;
       *) continue ;;
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
@@ -223,7 +225,7 @@ yaramfs_preserve_env() {
     if ! printf '%s\n' "${var_name}" | grep -Eq '^[A-Za-z0-9_]*$' ; then
       die ${LINENO} "invalid variable name: ${var_name}"
     fi
-    if ! printf '%s\n' "${var_val}" | grep -Eq '^[A-Za-z0-9_, \.\/]*$' ; then
+    if ! printf '%s\n' "${var_val}" | grep -Eq '^[A-Za-z0-9_'\''" /]*$' ; then
       die ${LINENO} "invalid variable value: ${var_name}"
     fi
     eval "${var_name}=\"${var_val}\""
@@ -238,16 +240,33 @@ yaramfs_load_env() {
 }
 
 yaramfs_restore_env() {
-  for var in $(env); do
-    var_name=$(echo "${var}" | cut -d= -s -f1)
-    case "${var_name}" in
-      _YARAMFS_CFG_*) ;; #we preserved this with _ prior
+  for var in $(set); do
+    case "${var}" in
+      _YARAMFS_CFG_*)
+        var_name=$(echo "${var}" | cut -d= -s -f1)
+      ;;
       *) continue ;;
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
-    var_name=$(echo "${var_name}" | cut -c2-) #remove leading _"
+    var_name="${var_name}" | cut -c2- # remove leading underscore
     eval "${var_name}=\"${var_val}\""
     var_name="_${var_name}"
     unset "${var_name}" #cleanup preserved variable
+  done
+}
+
+yaramfs_save_boot_env() {
+  cfg_file="${YARAMFS_CFG_CONFIG_DIR}/env/boot_config.sh"
+  echo "#!/bin/sh" > "${cfg_file}"
+  for var in $(set); do
+    case "${var}" in
+      YARAMFS_CFG_BOOT_*)
+        printf "saving %s\n" "${var}" >&2
+        var_name=$(echo "${var}" | cut -d= -s -f1)
+      ;;
+      *) continue ;;
+    esac
+    var_val=$(echo "${var}" | cut -d= -s -f2-)
+    echo "${var_name}=\"${var_val}\"" >> "${cfg_file}"
   done
 }

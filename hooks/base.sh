@@ -3,9 +3,8 @@
 
 prepare() {
   yaramfs_preserve_env
-  yaramfs_load_env
+  yaramfs_load_env "prepare"
   yaramfs_restore_env
-  echo ${YARAMFS_CFG_TESTVAL}
   default_value YARAMFS_CFG_PREPARE_BUSYBOX_PATH "$(which busybox)" ${LINENO}
   default_value YARAMFS_CFG_PREPARE_PROOT "$(which proot)" ${LINENO}
 

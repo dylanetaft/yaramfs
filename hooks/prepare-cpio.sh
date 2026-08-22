@@ -9,7 +9,9 @@ prepare() {
   BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
   OUT=${YARAMFS_CFG_PREPARE_OUT_CPIO}
   GZIP=${YARAMFS_CFG_PREPARE_GZIP}
-
+  CONFIG=${YARAMFS_CFG_CONFIG_DIR}
+  yaramfs_save_boot_env
+  install -m 0755 -D "${CONFIG}/env/boot_config.sh" "${BUILD_DIR}/hooks/env/boot_config.sh"
   if [ ! -x "${BUILD_DIR}/init" ]; then
     die ${LINENO} "missing executable ${BUILD_DIR}/init (base prepare must run first)"
   fi
