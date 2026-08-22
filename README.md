@@ -41,6 +41,7 @@ Order below matches a typical `config/` layout (00 → 99).
      - Installs guest `/init` and copies non-prepare-only hooks into the image
   - Boot
     - Mounts needed directories - devtmpfs, proc, tmpfs, etc
+    - Loads baked `hooks/env/boot_config.sh` (`YARAMFS_CFG_BOOT_*` from prepare-cpio) and `export_cfg` so later boot hooks inherit them (no preserve/restore; file is the source of truth)
 
 ### prepare-network
 ##### Parameters
@@ -97,18 +98,40 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
   - Boot
      - modprobe each name in `/etc/yaramfs-modules` (warn and continue on failure)
 
-### boot-network-ibft
+### boot-provisioned-config
+Optional override of the baked boot env from a file on a local filesystem (e.g. USB). Order is after modules and before network/iscsi.
 ##### Parameters
- - YARAMFS_CFG_BOOT_IBFT_DIR
-   - iBFT sysfs root (default: `/sys/firmware/ibft`)
- - YARAMFS_CFG_BOOT_IBFT_\<N\>_MAC / _IP / _PREFIX / _NETMASK / _VLAN
-   - Optional per-ethernet overrides (N = index from `ethernetN`).  Unset fields fall back to firmware sysfs values.
+ - YARAMFS_CFG_BOOT_PROVISIONED_UUID
+   - Filesystem UUID (no `UUID=` prefix). Empty/unset = hook no-ops.
+ - YARAMFS_CFG_BOOT_PROVISIONED_PATH
+   - Absolute path on that filesystem to a shell env file (same format as `boot_config.sh`). Required when UUID is set.
+ - YARAMFS_CFG_BOOT_PROVISIONED_DELAY
+   - Seconds to wait for the device via busybox `findfs` (default: 10).
+ - YARAMFS_CFG_BOOT_PROVISIONED_MNT
+   - Temporary mount point (default: `/mnt/provisioned`).
 ##### Phases
   - Prepare
      - No-op
   - Boot
-     - For each iBFT ethernet*: match MAC, rename iface to ibftN, optional VLAN, assign address from iBFT
-     - Requires iscsi_ibft (and NIC drivers) already loaded (modules hook)
+     - If UUID set: wait for `findfs UUID=…`, mount ro, copy PATH over `hooks/env/boot_config.sh`, umount
+     - Unset all `YARAMFS_CFG_BOOT_*`, `yaramfs_load_env boot`, `export_cfg` (provisioned file is authoritative)
+     - Needs block/fs drivers already loaded (modules hook); add fs modules via prepare if needed
+     - Fails hard when configured but device/file missing
+
+### boot-netroot-network
+Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, no colons: `aa:bb:cc:dd:ee:ff` → `aabbccddeeff`). iBFT and static CFG share the same apply path (match iface by MAC → up → optional VLAN → address).
+##### Parameters
+ - YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR
+   - iBFT sysfs root (default: `/sys/firmware/ibft`). Used only to discover MACs and fill unset fields.
+ - YARAMFS_CFG_BOOT_NETROOT_\<macid\>_IP / _PREFIX / _NETMASK / _VLAN
+   - Per-NIC settings. Unset fields are filled from the iBFT `ethernet*` entry with the same MAC (when present). Pre-set CFG always wins. Static netroot without iBFT: set the fields you need for that macid.
+##### Phases
+  - Prepare
+     - No-op
+  - Boot
+     - Collect macids from iBFT (if present) and from any already-set `YARAMFS_CFG_BOOT_NETROOT_<macid>_*`
+     - For each macid: optional iBFT fill (firmware strings pass `yaramfs_is_eval_safe`) → find netdev by MAC → configure
+     - Requires NIC drivers (and `iscsi_ibft` if using iBFT) already loaded (modules hook)
 
 ### boot-iscsi
 ##### Parameters

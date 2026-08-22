@@ -1,7 +1,7 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# iSCSI session from iBFT. Config order must be after modules (and boot-network-ibft).
+# iSCSI session from iBFT. Config order must be after modules (and boot-netroot-network).
 
 prepare() { :; }
 

@@ -1,0 +1,241 @@
+#!/bin/sh
+. hooks/shared/head.sh
+
+# Bring up NIC(s) for netroot (static CFG and/or iBFT).
+# Config keys use MAC id = lowercase hex, no separators (aa:bb:… → aabb…).
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_IP
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_PREFIX
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN
+# Unset fields may be filled from iBFT ethernet* with the same MAC.
+# Shared apply path: match iface by MAC → up → optional VLAN → ip addr.
+# Config order: after modules, before boot-iscsi.
+
+prepare() { :; }
+
+# Lowercase; strip whitespace and common MAC separators.
+_netroot_norm_mac() {
+  echo "$1" | tr 'A-F' 'a-f' | tr -d ' \t\n\r:.-'
+}
+
+_netroot_trim() {
+  echo "$1" | tr -d ' \t\n\r'
+}
+
+# True if $1 is a 12-char lowercase hex MAC id (safe in CFG var names).
+_netroot_is_macid() {
+  printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{12}$'
+}
+
+# Print iface name whose address matches macid, or fail.
+_netroot_find_iface_by_macid() {
+  _want=$1
+  for _p in /sys/class/net/*; do
+    [ -e "${_p}/address" ] || continue
+    _n=${_p##*/}
+    [ "${_n}" = "lo" ] && continue
+    _have=$(_netroot_norm_mac "$(cat "${_p}/address")")
+    if [ "${_have}" = "${_want}" ]; then
+      echo "${_n}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Common dotted masks → prefix length (fallback when prefix-len is empty).
+_netroot_mask_to_prefix() {
+  case "$1" in
+    255.255.255.255) echo 32 ;;
+    255.255.255.254) echo 31 ;;
+    255.255.255.252) echo 30 ;;
+    255.255.255.248) echo 29 ;;
+    255.255.255.240) echo 28 ;;
+    255.255.255.224) echo 27 ;;
+    255.255.255.192) echo 26 ;;
+    255.255.255.128) echo 25 ;;
+    255.255.255.0)   echo 24 ;;
+    255.255.254.0)   echo 23 ;;
+    255.255.252.0)   echo 22 ;;
+    255.255.248.0)   echo 21 ;;
+    255.255.240.0)   echo 20 ;;
+    255.255.224.0)   echo 19 ;;
+    255.255.192.0)   echo 18 ;;
+    255.255.128.0)   echo 17 ;;
+    255.255.0.0)     echo 16 ;;
+    255.0.0.0)       echo 8 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Append macid to ${_netroot_macids} once (space-separated).
+_netroot_macids_add() {
+  _m=$1
+  _netroot_is_macid "${_m}" || return 1
+  case " ${_netroot_macids} " in
+    *" ${_m} "*) ;;
+    *) _netroot_macids="${_netroot_macids}${_netroot_macids:+ }${_m}" ;;
+  esac
+}
+
+# Read YARAMFS_CFG_BOOT_NETROOT_<macid>_<SUFFIX> into stdout (macid must be valid).
+_netroot_cfg_get() {
+  _m=$1
+  _suf=$2
+  _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid for cfg get: ${_m}"
+  eval "_nr_v=\${YARAMFS_CFG_BOOT_NETROOT_${_m}_${_suf}}"
+  printf '%s' "${_nr_v}"
+}
+
+# If CFG field unset, set from $3 after yaramfs_is_eval_safe (firmware path).
+_netroot_default_from_fw() {
+  _m=$1
+  _suf=$2
+  _fw=$3
+  _name="YARAMFS_CFG_BOOT_NETROOT_${_m}_${_suf}"
+  eval "_nr_set=\${${_name}+x}"
+  [ -z "${_nr_set}" ] || return 0
+  [ -n "${_fw}" ] || return 0
+  if ! yaramfs_is_eval_safe "${_fw}"; then
+    die ${LINENO} "unsafe iBFT value for ${_name}"
+  fi
+  default_if_unset "${_name}" "${_fw}" ${LINENO}
+}
+
+# Fill unset NETROOT_<macid>_* from iBFT ethernet* with matching MAC (if any).
+_netroot_ibft_fill_macid() {
+  _m=$1
+  _ibft_root=${YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR}
+  [ -d "${_ibft_root}" ] || return 0
+
+  for _eth in "${_ibft_root}"/ethernet*; do
+    [ -d "${_eth}" ] || continue
+    _fw_mac=$(_netroot_norm_mac "$(cat "${_eth}/mac" 2>/dev/null)")
+    [ "${_fw_mac}" = "${_m}" ] || continue
+
+    _fw_ip=$(_netroot_trim "$(cat "${_eth}/ip-addr" 2>/dev/null)")
+    _fw_prefix=$(_netroot_trim "$(cat "${_eth}/prefix-len" 2>/dev/null)")
+    _fw_mask=$(_netroot_trim "$(cat "${_eth}/subnet-mask" 2>/dev/null)")
+    _fw_vlan=$(_netroot_trim "$(cat "${_eth}/vlan" 2>/dev/null)")
+
+    _netroot_default_from_fw "${_m}" IP "${_fw_ip}"
+    _netroot_default_from_fw "${_m}" PREFIX "${_fw_prefix}"
+    _netroot_default_from_fw "${_m}" NETMASK "${_fw_mask}"
+    _netroot_default_from_fw "${_m}" VLAN "${_fw_vlan}"
+    return 0
+  done
+  return 0
+}
+
+# Shared path: CFG for macid → find iface → up → vlan → address.
+_netroot_apply_macid() {
+  _m=$1
+  _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid: ${_m}"
+
+  _netroot_ibft_fill_macid "${_m}"
+
+  _ip=$(_netroot_trim "$(_netroot_cfg_get "${_m}" IP)")
+  _prefix=$(_netroot_trim "$(_netroot_cfg_get "${_m}" PREFIX)")
+  _mask=$(_netroot_trim "$(_netroot_cfg_get "${_m}" NETMASK)")
+  _vlan=$(_netroot_trim "$(_netroot_cfg_get "${_m}" VLAN)")
+
+  [ -n "${_ip}" ] || die ${LINENO} "netroot ${_m}: empty IP"
+  if ! yaramfs_is_eval_safe "${_ip}"; then
+    die ${LINENO} "netroot ${_m}: unsafe IP"
+  fi
+  if [ -n "${_prefix}" ] && ! yaramfs_is_eval_safe "${_prefix}"; then
+    die ${LINENO} "netroot ${_m}: unsafe PREFIX"
+  fi
+  if [ -n "${_mask}" ] && ! yaramfs_is_eval_safe "${_mask}"; then
+    die ${LINENO} "netroot ${_m}: unsafe NETMASK"
+  fi
+  if [ -n "${_vlan}" ] && ! yaramfs_is_eval_safe "${_vlan}"; then
+    die ${LINENO} "netroot ${_m}: unsafe VLAN"
+  fi
+
+  if [ -z "${_prefix}" ]; then
+    if [ -n "${_mask}" ]; then
+      _prefix=$(_netroot_mask_to_prefix "${_mask}") \
+        || die ${LINENO} "netroot ${_m}: cannot map netmask ${_mask} to prefix"
+    else
+      die ${LINENO} "netroot ${_m}: need PREFIX or NETMASK"
+    fi
+  fi
+
+  _ifname=$(_netroot_find_iface_by_macid "${_m}") \
+    || die ${LINENO} "netroot ${_m}: no netdev with that mac"
+
+  ip link set dev "${_ifname}" up \
+    || die ${LINENO} "ip link set ${_ifname} up failed"
+
+  _addr_dev=${_ifname}
+  if [ -n "${_vlan}" ] && [ "${_vlan}" != "0" ]; then
+    _vname="${_ifname}.${_vlan}"
+    if [ ! -e "/sys/class/net/${_vname}" ]; then
+      ip link add link "${_ifname}" name "${_vname}" type vlan id "${_vlan}" \
+        || die ${LINENO} "ip link add vlan ${_vname} failed"
+    fi
+    ip link set dev "${_vname}" up \
+      || die ${LINENO} "ip link set ${_vname} up failed"
+    _addr_dev=${_vname}
+  fi
+
+  # Idempotent: already-assigned address is OK.
+  if ! ip addr show dev "${_addr_dev}" 2>/dev/null | grep -F " ${_ip}/" >/dev/null 2>&1; then
+    ip addr add "${_ip}/${_prefix}" dev "${_addr_dev}" \
+      || die ${LINENO} "ip addr add ${_ip}/${_prefix} dev ${_addr_dev} failed"
+  fi
+
+  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_ip}/${_prefix} vlan=${_vlan:-0}" >&2
+}
+
+# macids from iBFT ethernet* (if present).
+_netroot_collect_ibft_macids() {
+  _ibft_root=${YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR}
+  [ -d "${_ibft_root}" ] || return 0
+  for _eth in "${_ibft_root}"/ethernet*; do
+    [ -d "${_eth}" ] || continue
+    _mid=$(_netroot_norm_mac "$(cat "${_eth}/mac" 2>/dev/null)")
+    if _netroot_is_macid "${_mid}"; then
+      _netroot_macids_add "${_mid}" || true
+    else
+      echo "netroot: skip iBFT ${_eth##*/}: bad mac '${_mid}'" >&2
+    fi
+  done
+}
+
+# macids from any YARAMFS_CFG_BOOT_NETROOT_<macid>_* already set.
+_netroot_collect_cfg_macids() {
+  for _var in $(set); do
+    case "${_var}" in
+      YARAMFS_CFG_BOOT_NETROOT_*=*)
+        _name=${_var%%=*}
+        _rest=${_name#YARAMFS_CFG_BOOT_NETROOT_}
+        # rest is macid_FIELD or IBFT_DIR etc.
+        case "${_rest}" in
+          IBFT_*) continue ;;
+        esac
+        _mid=${_rest%%_*}
+        _netroot_is_macid "${_mid}" || continue
+        _netroot_macids_add "${_mid}" || true
+        ;;
+    esac
+  done
+}
+
+boot() {
+  default_if_unset YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR "/sys/firmware/ibft" ${LINENO}
+
+  _netroot_macids=
+  _netroot_collect_ibft_macids
+  _netroot_collect_cfg_macids
+
+  [ -n "${_netroot_macids}" ] \
+    || die ${LINENO} "netroot: no MACs from iBFT or YARAMFS_CFG_BOOT_NETROOT_*"
+
+  for _m in ${_netroot_macids}; do
+    _netroot_apply_macid "${_m}"
+  done
+}
+
+prepare_or_boot "$@"

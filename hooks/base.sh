@@ -65,6 +65,11 @@ boot() {
   mount -t devpts devpts /dev/pts 2>/dev/null || true
   mkdir -p /tmp
   mount -t tmpfs tmpfs /tmp 2>/dev/null || true
+
+  # After /tmp is final: load baked boot env (prepare-cpio → hooks/env/boot_config.sh)
+  # and publish for later boot hooks. No preserve/restore — boot has no CLI env override path.
+  yaramfs_load_env "boot"
+  export_cfg
 }
 
 prepare_or_boot "$@"

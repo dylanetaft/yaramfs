@@ -42,6 +42,13 @@ sh_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# True (exit 0) if $1 is safe to interpolate into eval assignments.
+# Allowlist: alnum, underscore, quotes, space, slash, dot, colon
+# (dot/colon for IPs, netmasks, MAC strings before normalization).
+yaramfs_is_eval_safe() {
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_'\''" /.:]*$'
+}
+
 # export_cfg [VAR_NAME...]
 # Append export lines to YARAMFS_CFG_EXPORTS_FILE so the parent runner can
 # source them after this (child) hook exits. Creates parent dirs if needed.
@@ -235,12 +242,11 @@ yaramfs_preserve_env() {
     var_val=$(echo "${var}" | cut -d= -s -f2-)
     var_name="_${var_name}"
 
-    # paranoid, as we will pass to eval
-    # whitelist allowed characters in variable names and values
-    if ! printf '%s\n' "${var_name}" | grep -Eq '^[A-Za-z0-9_]*$' ; then
+    # paranoid, as we will pass to eval (see yaramfs_is_eval_safe)
+    if ! yaramfs_is_eval_safe "${var_name}"; then
       die ${LINENO} "invalid variable name: ${var_name}"
     fi
-    if ! printf '%s\n' "${var_val}" | grep -Eq '^[A-Za-z0-9_'\''" /]*$' ; then
+    if ! yaramfs_is_eval_safe "${var_val}"; then
       die ${LINENO} "invalid variable value: ${var_name}"
     fi
     eval "${var_name}=\"${var_val}\""
@@ -264,6 +270,13 @@ yaramfs_restore_env() {
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
     var_name=${var_name#_} # remove leading underscore
+    # paranoid, as we will pass to eval (see yaramfs_is_eval_safe)
+    if ! yaramfs_is_eval_safe "${var_name}"; then
+      die ${LINENO} "invalid variable name: ${var_name}"
+    fi
+    if ! yaramfs_is_eval_safe "${var_val}"; then
+      die ${LINENO} "invalid variable value: ${var_name}"
+    fi
     eval "${var_name}=\"${var_val}\""
     unset "_${var_name}" # cleanup preserved variable
   done
