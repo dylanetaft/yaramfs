@@ -202,3 +202,52 @@ EOF
 
   echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs)" >&2
 }
+
+# Config helpers
+# The timing of when they run differs between boot and prepare
+# so we are putting in shared helper
+# We load variables from a script but don't want to 
+# clobber manually set ones - those will override config loaded ones
+yaramfs_preserve_env() {
+  for var in $(env); do
+    var_name=$(echo "${var}" | cut -d= -s -f1)
+    case "${var_name}" in
+      YARAMFS_CFG_*) ;; #we will preserve this
+      *) continue ;;
+    esac
+    var_val=$(echo "${var}" | cut -d= -s -f2-)
+    var_name="_${var_name}"
+
+    # paranoid, as we will pass to eval
+    # whitelist allowed characters in variable names and values
+    if ! printf '%s\n' "${var_name}" | grep -Eq '^[A-Za-z0-9_]*$' ; then
+      die ${LINENO} "invalid variable name: ${var_name}"
+    fi
+    if ! printf '%s\n' "${var_val}" | grep -Eq '^[A-Za-z0-9_, \.\/]*$' ; then
+      die ${LINENO} "invalid variable value: ${var_name}"
+    fi
+    eval "${var_name}=\"${var_val}\""
+  done
+}
+
+yaramfs_load_env() {
+  _cfgtype=$1
+  if [ -f "${YARAMFS_CFG_CONFIG_DIR}/env/${_cfgtype}_config.sh" ]; then
+    . "${YARAMFS_CFG_CONFIG_DIR}/env/${_cfgtype}_config.sh"
+  fi
+}
+
+yaramfs_restore_env() {
+  for var in $(env); do
+    var_name=$(echo "${var}" | cut -d= -s -f1)
+    case "${var_name}" in
+      _YARAMFS_CFG_*) ;; #we preserved this with _ prior
+      *) continue ;;
+    esac
+    var_val=$(echo "${var}" | cut -d= -s -f2-)
+    var_name=$(echo "${var_name}" | cut -c2-) #remove leading _"
+    eval "${var_name}=\"${var_val}\""
+    var_name="_${var_name}"
+    unset "${var_name}" #cleanup preserved variable
+  done
+}
