@@ -1,0 +1,1 @@
+../hooks/boot-provisioned-config.sh

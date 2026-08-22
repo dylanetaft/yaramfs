@@ -46,7 +46,7 @@ sh_quote() {
 # Allowlist: alnum, underscore, quotes, space, slash, dot, colon
 # (dot/colon for IPs, netmasks, MAC strings before normalization).
 yaramfs_is_eval_safe() {
-  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_'\''" /.:]*$'
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_'\''" /.:-]*$'
 }
 
 # export_cfg [VAR_NAME...]

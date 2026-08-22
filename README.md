@@ -15,6 +15,19 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 - Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_PREPARE_MODULES_ADDL`).
 - Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREPARE_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
 
+## Configuration
+All `YARAMFS_CFG_*` parameters (prepare and boot) are documented in:
+
+**[`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh)**
+
+Copy and edit:
+
+```sh
+cp config/env/prepare_config.example.sh config/env/prepare_config.sh
+```
+
+`prepare_config.sh` is loaded at prepare (base). `YARAMFS_CFG_BOOT_*` set there are written into `boot_config.sh` by prepare-cpio and baked into the image. CLI env already set wins over the file. Name source of truth in code: `grep -R YARAMFS_CFG hooks/`.
+
 ## Build
 ```sh
 ./prepare.sh
@@ -24,17 +37,12 @@ Optional env overrides (examples):
 YARAMFS_CFG_PREPARE_MODULES="foo bar" ./prepare.sh
 YARAMFS_CFG_PREPARE_KERNEL=/path/to/Image YARAMFS_CFG_PREPARE_QEMU_APPEND="console=ttyAMA0 rdinit=/init root=UUID=..." ./prepare.sh
 ```
-Mininally required host tools: busybox, proot, lddtree, cpio, gzip/pigz 
+Mininally required host tools: busybox, proot, lddtree, cpio, gzip/pigz
 
 ## Hooks
-Order below matches a typical `config/` layout (00 → 99).
+Order below matches a typical `config/` layout (00 → 99). Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
 
 ### base
-##### Parameters
- - YARAMFS_CFG_PREPARE_BUSYBOX_PATH
-   - For prepare, specifies path to busybox
- - YARAMFS_CFG_PREPARE_PROOT
-   - Specifies path to proot binary
 ##### Phases
   - Prepare
      - Creates initramfs directories in build, installs busybox in image path
@@ -44,10 +52,6 @@ Order below matches a typical `config/` layout (00 → 99).
     - Loads baked `hooks/env/boot_config.sh` (`YARAMFS_CFG_BOOT_*` from prepare-cpio) and `export_cfg` so later boot hooks inherit them (no preserve/restore; file is the source of truth)
 
 ### prepare-network
-##### Parameters
- - YARAMFS_CFG_PREPARE_NETWORK_MODULES
-   - Override which modules in prepare phase are inserted into image.  Disables autodetection.  If you want to append modules, use YARAMFS_CFG_PREPARE_MODULES_ADDL.
-   - Unset = from lsmod, keep names whose modinfo path contains `/net/`.  Set empty = no NIC modules from this hook (8021q is still added).
 ##### Phases
   - Prepare
      - Collects network modules (or uses override), always adds 8021q, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
@@ -55,10 +59,6 @@ Order below matches a typical `config/` layout (00 → 99).
      - No-op (drivers are loaded by modules hook)
 
 ### prepare-input
-##### Parameters
- - YARAMFS_CFG_PREPARE_INPUT_MODULES
-   - Override input/hid modules for the image.  Disables autodetection.  Empty = none.
-   - Unset = from lsmod, keep names whose modinfo path contains `/input/` or `/hid/`.
 ##### Phases
   - Prepare
      - Collects input modules, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
@@ -68,9 +68,6 @@ Order below matches a typical `config/` layout (00 → 99).
 ### prepare-iscsi
 ##### Requires
 Host open-iscsi package installed (iscsistart, iscsiadm)
-##### Parameters
- - YARAMFS_CFG_PREPARE_ISCSITART
-   - Path to host iscsistart (default: `which iscsistart`)
 ##### Phases
   - Prepare
      - Appends iscsi kernel modules to YARAMFS_CFG_PREPARE_MODULES_ADDL
@@ -79,18 +76,17 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
   - Boot
      - No-op (session is boot-iscsi)
 
+### prepare-dropbear
+##### Requires
+Host dropbear package installed (`dropbear`, `dbclient`, `dropbearkey`, `dropbearconvert`)
+##### Phases
+  - Prepare
+     - `install_binary` each tool (+ shared libs) into `/bin` in the image
+     - Does not copy host keys or start a server (binaries only)
+  - Boot
+     - No-op (prepare-only in config naming)
+
 ### modules
-##### Parameters
- - YARAMFS_CFG_PREPARE_MODULES
-   - Explicit module names (space-separated) always considered for the image
- - YARAMFS_CFG_PREPARE_MODULES_ADDL
-   - Extra names accumulated by earlier prepare hooks (export_cfg).  You can also set this yourself to append.
- - YARAMFS_CFG_PREPARE_KERNEL_VERSION
-   - Kernel version for module tree (default: `uname -r`)
- - YARAMFS_CFG_PREPARE_MODULES_DIR
-   - Host modules directory (default: `/lib/modules/$YARAMFS_CFG_PREPARE_KERNEL_VERSION`)
- - YARAMFS_CFG_PREPARE_BUSYBOX_PATH
-   - busybox used for `modprobe -D` / `depmod` during prepare
 ##### Phases
   - Prepare
      - Resolves deps with busybox modprobe -D, copies .ko into build, runs depmod
@@ -100,15 +96,6 @@ Host open-iscsi package installed (iscsistart, iscsiadm)
 
 ### boot-provisioned-config
 Optional override of the baked boot env from a file on a local filesystem (e.g. USB). Order is after modules and before network/iscsi.
-##### Parameters
- - YARAMFS_CFG_BOOT_PROVISIONED_UUID
-   - Filesystem UUID (no `UUID=` prefix). Empty/unset = hook no-ops.
- - YARAMFS_CFG_BOOT_PROVISIONED_PATH
-   - Absolute path on that filesystem to a shell env file (same format as `boot_config.sh`). Required when UUID is set.
- - YARAMFS_CFG_BOOT_PROVISIONED_DELAY
-   - Seconds to wait for the device via busybox `findfs` (default: 10).
- - YARAMFS_CFG_BOOT_PROVISIONED_MNT
-   - Temporary mount point (default: `/mnt/provisioned`).
 ##### Phases
   - Prepare
      - No-op
@@ -120,11 +107,6 @@ Optional override of the baked boot env from a file on a local filesystem (e.g. 
 
 ### boot-netroot-network
 Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, no colons: `aa:bb:cc:dd:ee:ff` → `aabbccddeeff`). iBFT and static CFG share the same apply path (match iface by MAC → up → optional VLAN → address).
-##### Parameters
- - YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR
-   - iBFT sysfs root (default: `/sys/firmware/ibft`). Used only to discover MACs and fill unset fields.
- - YARAMFS_CFG_BOOT_NETROOT_\<macid\>_IP / _PREFIX / _NETMASK / _VLAN
-   - Per-NIC settings. Unset fields are filled from the iBFT `ethernet*` entry with the same MAC (when present). Pre-set CFG always wins. Static netroot without iBFT: set the fields you need for that macid.
 ##### Phases
   - Prepare
      - No-op
@@ -134,38 +116,35 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
      - Requires NIC drivers (and `iscsi_ibft` if using iBFT) already loaded (modules hook)
 
 ### boot-iscsi
-##### Parameters
- - YARAMFS_CFG_BOOT_ISCSI_TIMEOUT
-   - Seconds before killing hung iscsistart -b (default: 60)
 ##### Phases
   - Prepare
      - No-op
   - Boot
-     - `timeout … iscsistart -b` (login from iBFT).  Must run after network is up.
+     - If all four manual fields set: `timeout … iscsistart -i … -t … -g … -a …` [`-p …`]
+     - Else if none set: `timeout … iscsistart -b` (iBFT)
+     - Must run after network is up
+
+### custom
+Optional escape hatch: copy a host payload directory into the image and optionally run a boot script. Default config order is after netroot (50) and before iscsi (60); renumber the symlink to change timing.
+##### Phases
+  - Prepare
+     - Copies `CUSTOM_DIR/.` → `build/hooks/env/custom/`
+     - If `custom.sh` is present in the payload, chmod 0755 on the image copy
+  - Boot
+     - If `/hooks/env/custom/custom.sh` exists: run it (`sh`); non-zero or non-executable fails boot
+     - Missing script = no-op
+     - Script inherits `YARAMFS_CFG_*` and may `export_cfg` for later hooks
 
 ### root
-##### Parameters
- - (mostly from kernel cmdline, not env)
-   - root= — `/dev/…`, `UUID=…`, or `LABEL=…` (busybox findfs; no PARTUUID/PARTLABEL)
-   - rootfstype=, rootflags= (default flags: ro), rootdelay= (seconds to wait, default 30), init=
- - YARAMFS_CFG_BOOT_NEWROOT_MNT
-   - Mount point inside initramfs (default: `/mnt/root`)
- - YARAMFS_CFG_BOOT_ROOT / YARAMFS_CFG_BOOT_ROOTFSTYPE / YARAMFS_CFG_BOOT_ROOTFLAGS / YARAMFS_CFG_BOOT_ROOTDELAY / YARAMFS_CFG_BOOT_INIT
-   - Filled from cmdline during boot; INIT defaults to `/sbin/init` if unset
 ##### Phases
   - Prepare
      - No-op (uses busybox findfs already in the image)
   - Boot
-     - Parse cmdline, wait up to rootdelay for the device, mount on NEWROOT_MNT
+     - Parse cmdline (`root=`, `rootfstype=`, `rootflags=`, `rootdelay=`, `init=`), wait up to rootdelay for the device, mount on NEWROOT_MNT
      - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
- - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root`.  If nothing mounted root, drops to a rescue shell.
+  - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root`.  If nothing mounted root, drops to a rescue shell.
 
 ### prepare-cpio
-##### Parameters
- - YARAMFS_CFG_PREPARE_OUT_CPIO
-   - Output path (default: `out/initramfs.cpio.gz`)
- - YARAMFS_CFG_PREPARE_GZIP
-   - Compressor (default: pigz if present, else gzip)
 ##### Phases
   - Prepare
      - Packs `build/` with cpio newc and compresses to OUT_CPIO
@@ -173,22 +152,9 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
      - No-op (prepare-only in config naming)
 
 ### prepare-qemu
-##### Parameters
- - YARAMFS_CFG_PREPARE_KERNEL
-   - Kernel image path.  Unset = skip qemu (image-only prepare).
- - YARAMFS_CFG_PREPARE_OUT_CPIO
-   - Initrd path (default: `out/initramfs.cpio.gz`; must exist from prepare-cpio)
- - YARAMFS_CFG_PREPARE_QEMU_MACHINE
-   - Default: virt
- - YARAMFS_CFG_PREPARE_QEMU_CPU
-   - Default: max
- - YARAMFS_CFG_PREPARE_QEMU_MEM
-   - Default: 1024
- - YARAMFS_CFG_PREPARE_QEMU_APPEND
-   - Kernel cmdline (default: `console=ttyAMA0 rdinit=/init panic=1`).  Add root=UUID=… etc. here for real root tests.
 ##### Phases
   - Prepare
-     - If KERNEL set, exec qemu-system-aarch64 -nographic with kernel + initrd
+     - If KERNEL set, exec qemu-system-aarch64 -nographic with kernel + initrd (+ optional NIC)
   - Boot
      - No-op (prepare-only)
 
@@ -196,6 +162,7 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
 1. Write `hooks/myhook.sh` with `prepare()` / `boot()` and end with `prepare_or_boot "$@"`.
 2. Symlink from `config/NN-name.sh` (use `NN-prepare-…` if it should not run at boot in the guest).
 3. Source `hooks/shared/head.sh`; use `die`, `default_value`, `export_cfg`, `install_binary` as needed.
+4. Document new `YARAMFS_CFG_*` in `config/env/prepare_config.example.sh`.
 
 ## installkernel / kernel-install
 yaramfs can act as the **initrd generator** for Gentoo `installkernel` and systemd `kernel-install`. It only builds `initrd` into the installer's staging area; it does **not** call `ukify` or choose the final boot path. installkernel (or a separate `ukify` plugin when `uki_generator=ukify`) installs the staged file as e.g. `/boot/initramfs-$ver.img` or wraps it in a UKI.

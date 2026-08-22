@@ -6,9 +6,10 @@
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_IP
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_PREFIX
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_GATEWAY
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN
 # Unset fields may be filled from iBFT ethernet* with the same MAC.
-# Shared apply path: match iface by MAC → up → optional VLAN → ip addr.
+# Shared apply path: match iface by MAC → up → optional VLAN → ip addr → optional default route.
 # Config order: after modules, before boot-iscsi.
 
 prepare() { :; }
@@ -116,18 +117,20 @@ _netroot_ibft_fill_macid() {
     _fw_ip=$(_netroot_trim "$(cat "${_eth}/ip-addr" 2>/dev/null)")
     _fw_prefix=$(_netroot_trim "$(cat "${_eth}/prefix-len" 2>/dev/null)")
     _fw_mask=$(_netroot_trim "$(cat "${_eth}/subnet-mask" 2>/dev/null)")
+    _fw_gw=$(_netroot_trim "$(cat "${_eth}/gateway" 2>/dev/null)")
     _fw_vlan=$(_netroot_trim "$(cat "${_eth}/vlan" 2>/dev/null)")
 
     _netroot_default_from_fw "${_m}" IP "${_fw_ip}"
     _netroot_default_from_fw "${_m}" PREFIX "${_fw_prefix}"
     _netroot_default_from_fw "${_m}" NETMASK "${_fw_mask}"
+    _netroot_default_from_fw "${_m}" GATEWAY "${_fw_gw}"
     _netroot_default_from_fw "${_m}" VLAN "${_fw_vlan}"
     return 0
   done
   return 0
 }
 
-# Shared path: CFG for macid → find iface → up → vlan → address.
+# Shared path: CFG for macid → find iface → up → vlan → address → optional default gw.
 _netroot_apply_macid() {
   _m=$1
   _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid: ${_m}"
@@ -137,6 +140,7 @@ _netroot_apply_macid() {
   _ip=$(_netroot_trim "$(_netroot_cfg_get "${_m}" IP)")
   _prefix=$(_netroot_trim "$(_netroot_cfg_get "${_m}" PREFIX)")
   _mask=$(_netroot_trim "$(_netroot_cfg_get "${_m}" NETMASK)")
+  _gw=$(_netroot_trim "$(_netroot_cfg_get "${_m}" GATEWAY)")
   _vlan=$(_netroot_trim "$(_netroot_cfg_get "${_m}" VLAN)")
 
   [ -n "${_ip}" ] || die ${LINENO} "netroot ${_m}: empty IP"
@@ -148,6 +152,9 @@ _netroot_apply_macid() {
   fi
   if [ -n "${_mask}" ] && ! yaramfs_is_eval_safe "${_mask}"; then
     die ${LINENO} "netroot ${_m}: unsafe NETMASK"
+  fi
+  if [ -n "${_gw}" ] && ! yaramfs_is_eval_safe "${_gw}"; then
+    die ${LINENO} "netroot ${_m}: unsafe GATEWAY"
   fi
   if [ -n "${_vlan}" ] && ! yaramfs_is_eval_safe "${_vlan}"; then
     die ${LINENO} "netroot ${_m}: unsafe VLAN"
@@ -186,7 +193,15 @@ _netroot_apply_macid() {
       || die ${LINENO} "ip addr add ${_ip}/${_prefix} dev ${_addr_dev} failed"
   fi
 
-  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_ip}/${_prefix} vlan=${_vlan:-0}" >&2
+  # Optional default route via this NIC's gateway (iBFT or CFG).
+  if [ -n "${_gw}" ]; then
+    if ! ip route show default 2>/dev/null | grep -F " via ${_gw} " >/dev/null 2>&1; then
+      ip route replace default via "${_gw}" dev "${_addr_dev}" \
+        || die ${LINENO} "ip route default via ${_gw} dev ${_addr_dev} failed"
+    fi
+  fi
+
+  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_ip}/${_prefix} gw=${_gw:-none} vlan=${_vlan:-0}" >&2
 }
 
 # macids from iBFT ethernet* (if present).
