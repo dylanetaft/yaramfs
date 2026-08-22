@@ -42,20 +42,37 @@ sh_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-# export_cfg VAR_NAME [VAR_NAME...]
+# export_cfg [VAR_NAME...]
 # Append export lines to YARAMFS_CFG_EXPORTS_FILE so the parent runner can
-# source them after this (child) hook exits. Creates /tmp if needed.
+# source them after this (child) hook exits. Creates parent dirs if needed.
+# No args: dump every YARAMFS_CFG_* currently set (same discovery as preserve_env).
+# With names: append only those variables.
 export_cfg() {
   default_if_unset YARAMFS_CFG_EXPORTS_FILE "/tmp/yaramfs_exports" ${LINENO}
   _ec_file=${YARAMFS_CFG_EXPORTS_FILE}
   mkdir -p "$(dirname "${_ec_file}")" || die ${LINENO} "mkdir for ${_ec_file} failed"
 
-  for _ec_name in "$@"; do
-    [ -n "${_ec_name}" ] || continue
-    eval "_ec_val=\${${_ec_name}}"
-    printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
-      || die ${LINENO} "write ${_ec_file} failed"
-  done
+  if [ "$#" -eq 0 ]; then
+    for var in $(set); do
+      case "${var}" in
+        YARAMFS_CFG_*)
+          _ec_name=$(echo "${var}" | cut -d= -s -f1)
+          ;;
+        *) continue ;;
+      esac
+      [ -n "${_ec_name}" ] || continue
+      eval "_ec_val=\${${_ec_name}}"
+      printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
+        || die ${LINENO} "write ${_ec_file} failed"
+    done
+  else
+    for _ec_name in "$@"; do
+      [ -n "${_ec_name}" ] || continue
+      eval "_ec_val=\${${_ec_name}}"
+      printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
+        || die ${LINENO} "write ${_ec_file} failed"
+    done
+  fi
 }
 
 list_hooks() {
@@ -94,8 +111,9 @@ hook_fail_shell() {
 
 # Run each hook as its own process (sequential). Success/failure is only the
 # child exit status (die → 1). After success, if YARAMFS_CFG_EXPORTS_FILE
-# exists, source it then delete it so the next child inherits any export_cfg
-# vars. Missing exports file is normal (hook had nothing to publish).
+# exists, source it so the next child inherits any export_cfg vars. The file
+# is cleared once at phase start and then append-only for the run (not deleted
+# between hooks). Missing exports file is normal (nothing published yet).
 # On failure: prepare aborts (die); boot returns 1 so /init can hook_fail_shell.
 for_each_hook() {
   phase=$1
@@ -122,10 +140,8 @@ for_each_hook() {
     _feh_any=1
     echo "=> ${_feh_name} ${phase}" >&2
 
-    rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
     if ! sh "${_feh_path}" "${phase}"; then
       echo "yaramfs: hook ${_feh_name} ${phase} failed" >&2
-      rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
       if [ "${phase}" = "boot" ]; then
         return 1
       fi
@@ -136,7 +152,6 @@ for_each_hook() {
       # shellcheck disable=SC1090
       . "${YARAMFS_CFG_EXPORTS_FILE}" \
         || die ${LINENO} "sourcing ${YARAMFS_CFG_EXPORTS_FILE} after ${_feh_name} failed"
-      rm -f "${YARAMFS_CFG_EXPORTS_FILE}"
     fi
   done
 
@@ -248,10 +263,9 @@ yaramfs_restore_env() {
       *) continue ;;
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
-    var_name="${var_name}" | cut -c2- # remove leading underscore
+    var_name=${var_name#_} # remove leading underscore
     eval "${var_name}=\"${var_val}\""
-    var_name="_${var_name}"
-    unset "${var_name}" #cleanup preserved variable
+    unset "_${var_name}" # cleanup preserved variable
   done
 }
 

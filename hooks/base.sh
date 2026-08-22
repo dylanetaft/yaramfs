@@ -52,6 +52,9 @@ prepare() {
     cp -L "${path}" "${BUILD_DIR}/hooks/${name}"
     chmod 0755 "${BUILD_DIR}/hooks/${name}"
   done
+
+  # Publish all YARAMFS_CFG_* (config + defaults) for later prepare hooks / cpio.
+  export_cfg
 }
 
 boot() {
