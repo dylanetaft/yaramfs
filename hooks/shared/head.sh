@@ -152,9 +152,30 @@ for_each_hook() {
   fi
 }
 
+# Pick image lib dir for a host ELF path: one copy under /lib or /lib64 (etc).
+# Path wins when it already says lib64/lib32; else ELF e_ident[EI_CLASS]
+# (byte 4: 1=ELF32, 2=ELF64) for nested gcc dirs. Basename is enough for
+# ld.so default search (no ld.so.cache, no host path tree in the image).
+_install_binary_libdir() {
+  case "$1" in
+    */lib64/*) printf '%s' /lib64; return ;;
+    */lib32/*) printf '%s' /lib32; return ;;
+    */libx32/*) printf '%s' /libx32; return ;;
+  esac
+  # od -j4 -N1: ELF class byte (portable; no readelf required).
+  _ib_ei=$(od -An -t u1 -N 1 -j 4 "$1" 2>/dev/null | tr -d ' \t\n')
+  if [ "${_ib_ei}" = "2" ]; then
+    printf '%s' /lib64
+    return
+  fi
+  printf '%s' /lib
+}
+
 # install_binary SRC DEST
 # Copy ELF SRC into the build root at DEST (absolute image path, e.g. /sbin/iscsistart)
-# and all shared libraries from lddtree -l (flat list), preserving host paths.
+# and shared libraries from lddtree -l. Each dep is a single copy at
+# /lib{,64,…}/$(basename) so the dynamic linker finds it without host gcc paths
+# or ld.so.cache. PT_INTERP names like /lib64/ld-linux-*.so stay valid.
 install_binary() {
   _ib_src=$1
   _ib_dest=$2
@@ -197,17 +218,18 @@ install_binary() {
     if [ ! -e "${_ib_p}" ]; then
       die ${LINENO} "shared library missing for ${_ib_src}: ${_ib_p}"
     fi
-    # dirname may be a symlink (e.g. build/lib -> usr/lib); mkdir -p follows it.
-    mkdir -p "${_ib_build}/$(dirname "${_ib_p}")"
-    # Dereference so the image gets a real file at the path lddtree named
-    # (interpreter often a host symlink like /lib/ld-linux-*.so -> ../lib64/...).
-    cp -aL "${_ib_p}" "${_ib_build}${_ib_p}"
+    _ib_dir=$(_install_binary_libdir "${_ib_p}")
+    _ib_base=$(basename "${_ib_p}")
+    # build/lib -> usr/lib (base); mkdir -p follows the symlink.
+    mkdir -p "${_ib_build}${_ib_dir}"
+    # Dereference host symlinks so the image gets a real file (ld-linux, .so links).
+    cp -aL "${_ib_p}" "${_ib_build}${_ib_dir}/${_ib_base}"
     _ib_nlib=$((_ib_nlib + 1))
   done <<EOF
 ${_ib_deps}
 EOF
 
-  echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs)" >&2
+  echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs in /lib*)" >&2
 }
 
 # Config helpers
