@@ -23,8 +23,32 @@ boot() {
   _n=0
   _dev=
 
+  # busybox blkid: first block node with matching UUID (no findfs).
+  _want=$(printf '%s' "${YARAMFS_CFG_BOOT_PROVISIONED_UUID}" | tr 'A-F' 'a-f')
   while :; do
-    if _dev=$(findfs "${_spec}" 2>/dev/null) && [ -n "${_dev}" ] && [ -b "${_dev}" ]; then
+    _dev=
+    _blkid_out=$(blkid 2>/dev/null) || true
+    if [ -n "${_blkid_out}" ]; then
+      while IFS= read -r _line || [ -n "${_line}" ]; do
+        [ -n "${_line}" ] || continue
+        case "${_line}" in
+          /dev/*:*) ;;
+          *) continue ;;
+        esac
+        _cand=${_line%%:*}
+        [ -b "${_cand}" ] || continue
+        _got=$(printf '%s\n' "${_line}" | sed -n 's/.*UUID="\([^"]*\)".*/\1/p')
+        [ -n "${_got}" ] || continue
+        _got=$(printf '%s' "${_got}" | tr 'A-F' 'a-f')
+        if [ "${_got}" = "${_want}" ]; then
+          _dev=${_cand}
+          break
+        fi
+      done <<EOF
+${_blkid_out}
+EOF
+    fi
+    if [ -n "${_dev}" ] && [ -b "${_dev}" ]; then
       break
     fi
     if [ "${_n}" -ge "${_delay}" ]; then

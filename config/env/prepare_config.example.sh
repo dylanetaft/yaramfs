@@ -46,19 +46,15 @@
 # prepare-network
 # =============================================================================
 
-# Override NIC modules for the image; disables lsmod autodetection.
-# Unset = from lsmod, keep names whose modinfo path contains /net/.
-# Set empty = no NIC modules from this hook (8021q is still always added).
-# To append without disabling autodetection, use YARAMFS_CFG_PREPARE_MODULES_ADDL.
-#YARAMFS_CFG_PREPARE_NETWORK_MODULES="virtio_net virtio_pci"
+# NIC modules come from lsmod (modinfo path contains /net/); 8021q always added.
+# Extra names: YARAMFS_CFG_PREPARE_MODULES_ADDL (see modules section).
 
 # =============================================================================
 # prepare-input
 # =============================================================================
 
-# Override input/hid modules; disables autodetection. Empty = none.
-# Unset = from lsmod, keep names whose modinfo path contains /input/ or /hid/.
-#YARAMFS_CFG_PREPARE_INPUT_MODULES=
+# Input/hid modules come from lsmod (modinfo path contains /input/ or /hid/).
+# Extra names: YARAMFS_CFG_PREPARE_MODULES_ADDL (see modules section).
 
 # =============================================================================
 # prepare-iscsi
@@ -114,7 +110,7 @@
 # Required when UUID is set.
 #YARAMFS_CFG_BOOT_PROVISIONED_PATH=/yaramfs/boot_config.sh
 
-# Seconds to wait for the device via busybox findfs (default: 10).
+# Seconds to wait for the device via busybox blkid (default: 10).
 #YARAMFS_CFG_BOOT_PROVISIONED_DELAY=10
 
 # Temporary mount point inside initramfs (default: /mnt/provisioned).
@@ -171,20 +167,41 @@
 
 # =============================================================================
 # boot-force-debug
-# Non-empty → this boot hook dies; guest /init drops to recovery shell.
+# Non-empty → this boot hook dies; guest /init opens a child recovery shell
+# (PID 1 stays /init; exit shell to retry switch_root).
 # Leave unset/empty for normal boot (config/85-boot-force-debug.sh may stay linked).
 # =============================================================================
 
 #YARAMFS_CFG_BOOT_FORCE_DEBUG=1
 
 # =============================================================================
+# multipath (opt-in pair; both recommended together)
+#   config/32-prepare-multipath.sh  — before modules (MODULES_ADDL + binary)
+#   config/65-boot-multipath.sh     — after boot-iscsi, before boot-root
+# Packs multipath CLI + modules (no multipathd). boot-multipath runs multipath -v2;
+# failure → recovery shell. multipathd not required; CLI reads multipath.conf.
+# boot-root still prefers /dev/mapper/* for UUID=/LABEL= resolve.
+# =============================================================================
+
+#YARAMFS_CFG_PREPARE_MULTIPATH=          # path to multipath (default: which)
+# Built-in multipath modules are always appended to MODULES_ADDL.
+# Extra names: YARAMFS_CFG_PREPARE_MODULES_ADDL (see modules section).
+
+# Opt-in: bake a multipath.conf into the image (default: unset = none / clean room).
+# Use a dedicated file or host /etc/multipath.conf. Filtering (blacklist,
+# find_multipaths, …) applies when boot-multipath runs multipath -v2.
+#YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/etc/multipath.conf
+
+# =============================================================================
 # boot-root
 # Device selection is mostly kernel cmdline (root=, rootfstype=, rootflags=,
-# rootdelay=, init=). busybox findfs: /dev/…, UUID=…, LABEL=… (no PARTUUID).
-# These CFG vars can bake defaults; cmdline fills ROOT/ROOTFSTYPE/etc at boot.
+# rootdelay=, init=). busybox blkid: /dev/…, UUID=…, LABEL=… (no PARTUUID).
+# UUID/LABEL: blkid hits; prefer /dev/mapper/* (multipath maps), else first other.
+# /dev/* as-is. These CFG vars can bake defaults; cmdline fills ROOT/… at boot.
 # =============================================================================
 
 # Mount point inside initramfs (default: /mnt/root).
+# Also the default path /init probes after a recovery shell exits.
 #YARAMFS_CFG_BOOT_NEWROOT_MNT=/mnt/root
 
 # Usually filled from cmdline at boot; INIT defaults to /sbin/init if unset.
@@ -196,6 +213,11 @@
 
 # Set by boot-root after mount (export_cfg for PID 1); not typically set by hand:
 #   YARAMFS_CFG_BOOT_NEWROOT
+#
+# Recovery shell (child of /init): mount root on NEWROOT_MNT, then exit.
+# Optional markers if not using the default path/init:
+#   /tmp/yaramfs_newroot  — first line = mount path
+#   /tmp/yaramfs_init     — first line = init path on that root (e.g. /sbin/init)
 
 # =============================================================================
 # prepare-cpio
@@ -226,6 +248,6 @@
 #YARAMFS_CFG_PREPARE_QEMU_APPEND="console=ttyAMA0 rdinit=/init panic=1"
 
 # Optional guest NIC MAC for netroot testing (e.g. 52:54:00:12:34:56).
-# Unset = no NIC. Image needs virtio_net (MODULES_ADDL / network override).
+# Unset = no NIC. Image needs virtio_net (YARAMFS_CFG_PREPARE_MODULES_ADDL).
 # SLIRP guest IP is typically 10.0.2.15/24.
 #YARAMFS_CFG_PREPARE_QEMU_NET_MAC=52:54:00:12:34:56

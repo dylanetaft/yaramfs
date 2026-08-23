@@ -1,31 +1,21 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# Resolve root= from the kernel cmdline (busybox findfs: UUID= / LABEL=),
-# mount it on /mnt/root, and export paths so PID 1 /init can switch_root.
-# PARTUUID/PARTLABEL are not supported (busybox findfs has no partition tags).
+# Resolve root= from the kernel cmdline, mount on /mnt/root, export for /init.
+# UUID=/LABEL= via busybox blkid (may list several hits); prefer /dev/mapper/*
+# (so multipath maps from boot-multipath win over underlying path devices).
+# Absolute /dev/* is never rewritten. PARTUUID/PARTLABEL not supported.
 
 prepare() { :; }
 
-# Parse one KEY=value (or bare flag) from a cmdline token into globals.
 _root_parse_token() {
   _tok=$1
   case "${_tok}" in
-    root=*)
-      YARAMFS_CFG_BOOT_ROOT=${_tok#root=}
-      ;;
-    rootfstype=*)
-      YARAMFS_CFG_BOOT_ROOTFSTYPE=${_tok#rootfstype=}
-      ;;
-    rootflags=*)
-      YARAMFS_CFG_BOOT_ROOTFLAGS=${_tok#rootflags=}
-      ;;
-    rootdelay=*)
-      YARAMFS_CFG_BOOT_ROOTDELAY=${_tok#rootdelay=}
-      ;;
-    init=*)
-      YARAMFS_CFG_BOOT_INIT=${_tok#init=}
-      ;;
+    root=*) YARAMFS_CFG_BOOT_ROOT=${_tok#root=} ;;
+    rootfstype=*) YARAMFS_CFG_BOOT_ROOTFSTYPE=${_tok#rootfstype=} ;;
+    rootflags=*) YARAMFS_CFG_BOOT_ROOTFLAGS=${_tok#rootflags=} ;;
+    rootdelay=*) YARAMFS_CFG_BOOT_ROOTDELAY=${_tok#rootdelay=} ;;
+    init=*) YARAMFS_CFG_BOOT_INIT=${_tok#init=} ;;
   esac
 }
 
@@ -33,39 +23,86 @@ _root_parse_cmdline() {
   if [ ! -r /proc/cmdline ]; then
     die ${LINENO} "/proc/cmdline not readable"
   fi
-  # Word-split is intentional: kernel cmdline is space-separated tokens.
   # shellcheck disable=SC2013
   for _tok in $(cat /proc/cmdline); do
     _root_parse_token "${_tok}"
   done
 }
 
-# Print block device path for ROOT spec, or fail.
-# Supports /dev/*, UUID=, LABEL= (busybox findfs).
+# Print preferred block dev for UUID=… or LABEL=… from blkid, or fail.
+_root_resolve_tag() {
+  _spec=$1
+  _kind=${_spec%%=*}
+  _want=${_spec#*=}
+  [ -n "${_want}" ] || return 1
+
+  if [ "${_kind}" = "UUID" ]; then
+    _want=$(printf '%s' "${_want}" | tr 'A-F' 'a-f')
+  fi
+
+  _pick_mapper=
+  _pick_other=
+  _blkid_out=$(blkid 2>/dev/null) || true
+  [ -n "${_blkid_out}" ] || return 1
+
+  while IFS= read -r _line || [ -n "${_line}" ]; do
+    [ -n "${_line}" ] || continue
+    case "${_line}" in
+      /dev/*:*) ;;
+      *) continue ;;
+    esac
+
+    _dev=${_line%%:*}
+    [ -b "${_dev}" ] || continue
+
+    case "${_kind}" in
+      UUID)
+        _got=$(printf '%s\n' "${_line}" | sed -n 's/.*UUID="\([^"]*\)".*/\1/p')
+        [ -n "${_got}" ] || continue
+        _got=$(printf '%s' "${_got}" | tr 'A-F' 'a-f')
+        [ "${_got}" = "${_want}" ] || continue
+        ;;
+      LABEL)
+        _got=$(printf '%s\n' "${_line}" | sed -n 's/.*LABEL="\([^"]*\)".*/\1/p')
+        [ -n "${_got}" ] || continue
+        [ "${_got}" = "${_want}" ] || continue
+        ;;
+      *) return 1 ;;
+    esac
+
+    case "${_dev}" in
+      /dev/mapper/*) [ -z "${_pick_mapper}" ] && _pick_mapper=${_dev} ;;
+      *) [ -z "${_pick_other}" ] && _pick_other=${_dev} ;;
+    esac
+  done <<EOF
+${_blkid_out}
+EOF
+
+  if [ -n "${_pick_mapper}" ]; then
+    printf '%s\n' "${_pick_mapper}"
+    return 0
+  fi
+  if [ -n "${_pick_other}" ]; then
+    printf '%s\n' "${_pick_other}"
+    return 0
+  fi
+  return 1
+}
+
 _root_resolve() {
   _spec=$1
-  if [ -z "${_spec}" ]; then
-    return 1
-  fi
+  [ -n "${_spec}" ] || return 1
 
   case "${_spec}" in
     /dev/*)
-      if [ -b "${_spec}" ]; then
-        printf '%s\n' "${_spec}"
-        return 0
-      fi
-      return 1
+      [ -b "${_spec}" ] || return 1
+      printf '%s\n' "${_spec}"
       ;;
     UUID=*|LABEL=*)
-      _dev=$(findfs "${_spec}" 2>/dev/null) || return 1
-      if [ -n "${_dev}" ] && [ -b "${_dev}" ]; then
-        printf '%s\n' "${_dev}"
-        return 0
-      fi
-      return 1
+      _root_resolve_tag "${_spec}"
       ;;
     PARTUUID=*|PARTLABEL=*)
-      die ${LINENO} "root=${_spec}: busybox findfs supports UUID=/LABEL= only"
+      die ${LINENO} "root=${_spec}: PARTUUID/PARTLABEL not supported"
       ;;
     *)
       die ${LINENO} "unsupported root= spec: ${_spec}"
@@ -73,26 +110,21 @@ _root_resolve() {
   esac
 }
 
-# Wait until _root_resolve succeeds, up to rootdelay=N seconds (default 30).
 _root_wait_resolve() {
   _spec=$1
   _delay=${YARAMFS_CFG_BOOT_ROOTDELAY:-30}
   _n=0
-  _dev=
 
   while :; do
     if _dev=$(_root_resolve "${_spec}"); then
       printf '%s\n' "${_dev}"
       return 0
     fi
-
     if [ "${_n}" -ge "${_delay}" ]; then
       return 1
     fi
-
     sleep 1
     _n=$((_n + 1))
-    # Progress every 5s so serial consoles are not silent on slow iSCSI.
     if [ $((_n % 5)) -eq 0 ]; then
       echo "yaramfs: waiting for root=${_spec} (${_n}s)" >&2
     fi
@@ -119,7 +151,6 @@ boot() {
   mkdir -p "${YARAMFS_CFG_BOOT_NEWROOT_MNT}" \
     || die ${LINENO} "mkdir ${YARAMFS_CFG_BOOT_NEWROOT_MNT} failed"
 
-  # Kernel default is ro when rootflags= is absent.
   default_if_unset YARAMFS_CFG_BOOT_ROOTFLAGS "ro" ${LINENO}
   [ -n "${YARAMFS_CFG_BOOT_ROOTFLAGS}" ] || YARAMFS_CFG_BOOT_ROOTFLAGS=ro
 

@@ -1,0 +1,50 @@
+#!/bin/sh
+. hooks/shared/head.sh
+
+# dm-multipath image bits: modules + multipath CLI (not multipathd).
+# Prepare-only (config/NN-prepare-multipath.sh). Must run before modules so
+# MODULES_ADDL is packed. Guest boot is boot-multipath.sh (after iscsi, before
+# boot-root).
+# Clean room by default: no host multipath.conf / wwids / bindings / conf.d.
+# multipath uses libdevmapper (via install_binary); dmsetup/kpartx CLIs not needed.
+# The multipath CLI alone is enough to build DM maps at boot; multipathd is only
+# needed later for ongoing path monitoring (not in this image).
+
+# Default module set; kmod pulls further deps. Extra modules: YARAMFS_CFG_PREPARE_MODULES_ADDL.
+MULTIPATH_MODULES_DEFAULT="dm_mod dm_multipath dm_round_robin dm_service_time dm_queue_length scsi_dh_alua scsi_dh_rdac"
+
+prepare() {
+  BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
+
+  default_value YARAMFS_CFG_PREPARE_MULTIPATH "$(which multipath 2>/dev/null)" ${LINENO}
+  if [ ! -x "${YARAMFS_CFG_PREPARE_MULTIPATH}" ]; then
+    die ${LINENO} "multipath not executable: ${YARAMFS_CFG_PREPARE_MULTIPATH:-"(unset)"}"
+  fi
+
+  YARAMFS_CFG_PREPARE_MODULES_ADDL="${YARAMFS_CFG_PREPARE_MODULES_ADDL} ${MULTIPATH_MODULES_DEFAULT}"
+  YARAMFS_CFG_PREPARE_MODULES_ADDL=${YARAMFS_CFG_PREPARE_MODULES_ADDL# }
+  export_cfg YARAMFS_CFG_PREPARE_MODULES_ADDL
+
+  install_binary "${YARAMFS_CFG_PREPARE_MULTIPATH}" /sbin/multipath
+
+  # Runtime dirs only (empty). boot-multipath also mkdir -p these before multipath -v2.
+  mkdir -p "${BUILD_DIR}/etc/multipath"
+  mkdir -p "${BUILD_DIR}/var/lib/multipath"
+
+  # Opt-in conf only (unset/empty = clean room, multipath built-in defaults).
+  # Path to a multipath.conf to bake as /etc/multipath.conf (blacklist,
+  # find_multipaths, etc. are applied by the multipath CLI without multipathd).
+  if [ -n "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" ]; then
+    [ -r "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" ] \
+      || die ${LINENO} "multipath conf not readable: ${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}"
+    [ -f "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" ] \
+      || die ${LINENO} "multipath conf not a regular file: ${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}"
+    cp -a "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" "${BUILD_DIR}/etc/multipath.conf" \
+      || die ${LINENO} "failed to copy multipath conf"
+    echo "prepare-multipath: baked ${YARAMFS_CFG_PREPARE_MULTIPATH_CONF} -> /etc/multipath.conf" >&2
+  fi
+}
+
+boot() { :; }
+
+prepare_or_boot "$@"

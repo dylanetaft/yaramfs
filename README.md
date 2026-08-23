@@ -10,7 +10,7 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 ## How it works
 - `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order.
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
-- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted.
+- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted. If not, it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
 - Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_PREPARE_MODULES_ADDL`).
 - Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREPARE_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
@@ -54,7 +54,7 @@ Order below matches a typical `config/` layout (00 → 99). Parameters: see [`co
 ### prepare-network
 ##### Phases
   - Prepare
-     - Collects network modules (or uses override), always adds 8021q, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
+     - Collects network modules from lsmod, always adds 8021q, appends to YARAMFS_CFG_PREPARE_MODULES_ADDL
   - Boot
      - No-op (drivers are loaded by modules hook)
 
@@ -104,7 +104,7 @@ Optional override of the baked boot env from a file on a local filesystem (e.g. 
   - Prepare
      - No-op
   - Boot
-     - If UUID set: wait for `findfs UUID=…`, mount ro, copy PATH over `hooks/env/boot_config.sh`, umount
+     - If UUID set: wait for busybox `blkid` UUID match, mount ro, copy PATH over `hooks/env/boot_config.sh`, umount
      - Unset all `YARAMFS_CFG_BOOT_*`, `yaramfs_load_env boot`, `export_cfg` (provisioned file is authoritative)
      - Needs block/fs drivers already loaded (modules hook); add fs modules via prepare if needed
      - Fails hard when configured but device/file missing
@@ -142,14 +142,52 @@ Optional escape hatch: copy a host payload directory into the image and optional
 ### boot-root
 ##### Phases
   - Prepare
-     - No-op (uses busybox findfs already in the image)
+     - No-op (uses busybox `blkid` already in the image)
   - Boot
-     - Parse cmdline (`root=`, `rootfstype=`, `rootflags=`, `rootdelay=`, `init=`), wait up to rootdelay for the device, mount on NEWROOT_MNT
+     - Parse cmdline (`root=`, `rootfstype=`, `rootflags=`, `rootdelay=`, `init=`)
+     - Wait up to rootdelay for the device, mount on NEWROOT_MNT
+     - `root=/dev/…` — use that block node as-is
+     - `root=UUID=…` / `LABEL=…` — busybox `blkid`; prefer `/dev/mapper/*` (multipath maps), else first other match
      - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
-  - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root`.  If nothing mounted root, drops to a rescue shell.
+  - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root` when newroot is ready.
+
+### multipath (opt-in pair)
+No **multipathd**. Host needs multipath-tools. Enable both (order matters):
+
+```sh
+ln -sf ../hooks/prepare-multipath.sh config/32-prepare-multipath.sh   # before modules
+ln -sf ../hooks/boot-multipath.sh    config/65-boot-multipath.sh      # after iscsi, before boot-root
+```
+
+##### prepare-multipath (prepare-only)
+  - Prepare
+     - Appends multipath modules to `YARAMFS_CFG_PREPARE_MODULES_ADDL`
+     - Installs `multipath` only (libdevmapper via `install_binary`; no dmsetup/kpartx/multipathd)
+     - Empty `/etc/multipath` and `/var/lib/multipath` (clean room)
+     - Optional: `YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/path/to/multipath.conf` bakes `/etc/multipath.conf` (off by default; CLI applies blacklist/`find_multipaths` without multipathd)
+  - Boot
+     - Not installed in the guest (`NN-prepare-*`)
+
+##### boot-multipath
+  - Prepare
+     - No-op
+  - Boot
+     - `multipath -v2` (failure → die / recovery shell)
+
+### Recovery shell
+If boot hooks fail or nothing mounted a usable root, `/init` **stays PID 1** and runs an interactive shell as a **child** (not `exec` over init).
+
+1. Fix whatever failed (modules, network, iSCSI, mount, …).
+2. Mount the real root on **`/mnt/root`** (default), or write the mount path to **`/tmp/yaramfs_newroot`**.
+3. Ensure **`/mnt/root/sbin/init`** exists (or write the init path to **`/tmp/yaramfs_init`**).
+4. **`exit`** the shell — `/init` retries move-mount of proc/sys/dev/run and `switch_root`.
+
+If root is still not ready, the banner and shell open again (no kernel panic from exiting the recovery shell). Env vars set inside the child shell are **not** visible to PID 1; use the mountpoint or marker files above.
+
+On each loop iteration `/init` also accepts `YARAMFS_CFG_BOOT_NEWROOT` already exported by an earlier hook (e.g. boot-root succeeded, a later hook failed) and may `switch_root` without opening a shell.
 
 ### boot-force-debug
-Opt-in forced boot failure so guest `/init` drops to the recovery shell. Default config slot is after boot-root (85); renumber to stop earlier in the sequence.
+Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config slot is after boot-root (85); renumber to stop earlier in the sequence.
 ##### Phases
   - Prepare
      - No-op

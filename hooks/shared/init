@@ -1,5 +1,6 @@
 #!/bin/sh
 # PID 1 inside the initramfs — same hook runner as host runme.sh.
+# Owns switch_root and the recovery shell (hooks only mount/export NEWROOT).
 export PATH=/bin:/sbin
 YARAMFS_CFG_CONFIG_DIR=/hooks
 export YARAMFS_CFG_CONFIG_DIR
@@ -8,18 +9,46 @@ export YARAMFS_CFG_CONFIG_DIR
 mkdir -p /tmp
 
 . /hooks/shared/head.sh
-# Boot hooks run as children; rescue shell / switch_root must stay PID 1.
-# Any boot hook failure → recovery shell (do not switch_root even if NEWROOT set).
-if ! for_each_hook boot; then
-  echo "yaramfs: boot hooks failed" >&2
-  hook_fail_shell
-fi
 
-if [ -n "${YARAMFS_CFG_BOOT_NEWROOT}" ]; then
-  default_value YARAMFS_CFG_BOOT_INIT "/sbin/init" ${LINENO}
-  _nr=${YARAMFS_CFG_BOOT_NEWROOT}
+# Resolve NEWROOT/INIT from PID 1 state (not child-shell env).
+# Order: YARAMFS_CFG_BOOT_NEWROOT → /tmp/yaramfs_newroot → NEWROOT_MNT|/mnt/root.
+# Optional init: YARAMFS_CFG_BOOT_INIT → /tmp/yaramfs_init → /sbin/init.
+# Sets _tsr_newroot and _tsr_init. Returns 0 if ${NEWROOT}${INIT} exists.
+try_switch_root_resolve() {
+  _tsr_newroot=
+  _tsr_init=
 
-  # Hand off virtual filesystems so the real root keeps them.
+  if [ -n "${YARAMFS_CFG_BOOT_NEWROOT:-}" ]; then
+    _tsr_newroot=${YARAMFS_CFG_BOOT_NEWROOT}
+  elif [ -r /tmp/yaramfs_newroot ]; then
+    _tsr_newroot=$(sed -n '1p' /tmp/yaramfs_newroot | tr -d '\r')
+  else
+    _tsr_newroot=${YARAMFS_CFG_BOOT_NEWROOT_MNT:-/mnt/root}
+  fi
+
+  if [ -n "${YARAMFS_CFG_BOOT_INIT:-}" ]; then
+    _tsr_init=${YARAMFS_CFG_BOOT_INIT}
+  elif [ -r /tmp/yaramfs_init ]; then
+    _tsr_init=$(sed -n '1p' /tmp/yaramfs_init | tr -d '\r')
+  else
+    _tsr_init=/sbin/init
+  fi
+
+  [ -n "${_tsr_newroot}" ] || return 1
+  [ -e "${_tsr_newroot}${_tsr_init}" ] || return 1
+  return 0
+}
+
+# Move virt fs into newroot and exec switch_root. Returns 1 only if not ready
+# or switch_root failed (exec does not return on success).
+try_switch_root_from_state() {
+  if ! try_switch_root_resolve; then
+    return 1
+  fi
+
+  _nr=${_tsr_newroot}
+  _init=${_tsr_init}
+
   for _d in proc sys dev run; do
     if [ -d "${_nr}/${_d}" ] && mountpoint -q "/${_d}" 2>/dev/null; then
       mount --move "/${_d}" "${_nr}/${_d}" 2>/dev/null \
@@ -28,8 +57,55 @@ if [ -n "${YARAMFS_CFG_BOOT_NEWROOT}" ]; then
     fi
   done
 
-  echo "yaramfs: switch_root ${_nr} ${YARAMFS_CFG_BOOT_INIT}" >&2
-  exec switch_root "${_nr}" "${YARAMFS_CFG_BOOT_INIT}"
+  echo "yaramfs: switch_root ${_nr} ${_init}" >&2
+  exec switch_root "${_nr}" "${_init}"
+
+  echo "yaramfs: switch_root failed: ${_nr} ${_init}" >&2
+  return 1
+}
+
+print_recovery_banner() {
+  echo "yaramfs: recovery shell (/init remains PID 1; this shell is a child)" >&2
+  echo "yaramfs:   Mount real root on /mnt/root (or write path to /tmp/yaramfs_newroot)." >&2
+  echo "yaramfs:   Ensure .../sbin/init exists (or write path to /tmp/yaramfs_init)." >&2
+  echo "yaramfs:   Exit the shell to attempt switch_root; if not ready, shell opens again." >&2
+}
+
+# Child shell only — does not exec over PID 1. Busybox setsid needs -w to wait.
+recovery_shell_child() {
+  echo "yaramfs: dropping to recovery shell" >&2
+  trap '' INT
+  trap '' QUIT
+
+  if [ -c /dev/console ]; then
+    if command -v cttyhack >/dev/null 2>&1; then
+      setsid -w cttyhack sh -i <>/dev/console 2>&1 \
+        || setsid -w sh -i <>/dev/console 2>&1 \
+        || sh -i <>/dev/console 2>&1
+    else
+      sh -i <>/dev/console 2>&1
+    fi
+  elif command -v cttyhack >/dev/null 2>&1; then
+    setsid -w cttyhack sh -i || sh -i
+  else
+    sh -i
+  fi
+}
+
+# Boot hooks run as children; /init stays PID 1 for rescue + switch_root.
+if ! for_each_hook boot; then
+  echo "yaramfs: boot hooks failed" >&2
 fi
 
-hook_fail_shell
+trap '' INT
+trap '' QUIT
+
+# Try switch_root when newroot looks ready (hooks may have set NEWROOT even
+# after a later hook failed). Else child recovery shell; on exit, retry.
+while :; do
+  if try_switch_root_from_state; then
+    : # unreachable: success is exec switch_root
+  fi
+  print_recovery_banner
+  recovery_shell_child
+done

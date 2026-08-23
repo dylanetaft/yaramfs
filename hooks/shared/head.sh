@@ -101,27 +101,12 @@ prepare_or_boot() {
   fi
 }
 
-# Drop to an interactive shell as the current process (use from PID 1 /init).
-hook_fail_shell() {
-  echo "yaramfs: dropping to shell" >&2
-  if [ -c /dev/console ]; then
-    if command -v cttyhack >/dev/null 2>&1; then
-      exec setsid cttyhack sh -i </dev/console >/dev/console 2>&1
-    fi
-    exec sh -i </dev/console >/dev/console 2>&1
-  fi
-  if command -v cttyhack >/dev/null 2>&1; then
-    exec setsid cttyhack sh -i
-  fi
-  exec sh -i
-}
-
 # Run each hook as its own process (sequential). Success/failure is only the
 # child exit status (die → 1). After success, if YARAMFS_CFG_EXPORTS_FILE
 # exists, source it so the next child inherits any export_cfg vars. The file
 # is cleared once at phase start and then append-only for the run (not deleted
 # between hooks). Missing exports file is normal (nothing published yet).
-# On failure: prepare aborts (die); boot returns 1 so /init can hook_fail_shell.
+# On failure: prepare aborts (die); boot returns 1 so guest /init can recover.
 for_each_hook() {
   phase=$1
   if [ -z "${phase}" ]; then
