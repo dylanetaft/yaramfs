@@ -1,0 +1,1 @@
+../hooks/prepare-input.sh

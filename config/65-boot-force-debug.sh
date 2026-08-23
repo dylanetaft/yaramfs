@@ -1,0 +1,1 @@
+../hooks/boot-force-debug.sh
