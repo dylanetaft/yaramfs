@@ -27,12 +27,21 @@ boot() {
 }
 
 # ensure_modules NAME [NAME...]
-# Resolve each root with busybox modprobe -D -q, copy unique .ko paths into the
-# build tree, write boot roots to $BUILD_DIR/etc/yaramfs-modules, depmod if needed.
-# Builtin/missing roots are skipped (-q yields no insmod lines). Missing .ko files
-# are caught at copy time.
+# Resolve each root against YARAMFS_CFG_PREPARE_MODULES_DIR (target kver tree),
+# copy unique .ko paths into the build tree, write boot roots to
+# $BUILD_DIR/etc/yaramfs-modules, depmod if needed.
+#
+# Dep resolution uses host **kmod** modprobe only (not busybox — no useful -d):
+#   modprobe -d ROOT -S KVER -D -q NAME
+# ROOT is the parent of lib/modules/KVER (e.g. / or /mnt/gentoo).
+#
+# If kmod yields no insmod lines, safety fallback: find NAME.ko* under MODULES_DIR
+# and copy that leaf only (no deps — list soft deps in PREPARE_MODULES* if needed).
+#
+# Builtin/missing roots are skipped. Missing .ko files are caught at copy time.
 # Caller must set YARAMFS_CFG_PREPARE_KERNEL_VERSION, YARAMFS_CFG_PREPARE_MODULES_DIR,
-# YARAMFS_CFG_PREPARE_BUSYBOX_PATH.
+# YARAMFS_CFG_PREPARE_BUSYBOX_PATH (busybox is used for depmod -b only).
+# Optional: YARAMFS_CFG_PREPARE_MODPROBE = path to kmod modprobe.
 ensure_modules() {
   _em_kver=${YARAMFS_CFG_PREPARE_KERNEL_VERSION}
   _em_moddir=${YARAMFS_CFG_PREPARE_MODULES_DIR}
@@ -52,22 +61,61 @@ ensure_modules() {
     return 0
   fi
 
+  # kmod: modules live at $ROOT/lib/modules/$KVER.
+  _em_mod_root=
+  _em_mod_base=${_em_moddir%/}
+  case "${_em_mod_base}" in
+    */lib/modules/"${_em_kver}")
+      _em_mod_root=${_em_mod_base%/lib/modules/"${_em_kver}"}
+      [ -n "${_em_mod_root}" ] || _em_mod_root=/
+      ;;
+    */lib/modules/*)
+      _em_mod_ver=$(basename "${_em_mod_base}")
+      _em_mod_root=${_em_mod_base%/lib/modules/"${_em_mod_ver}"}
+      [ -n "${_em_mod_root}" ] || _em_mod_root=/
+      ;;
+    *)
+      die ${LINENO} "MODULES_DIR must look like …/lib/modules/<kver>: ${_em_moddir}"
+      ;;
+  esac
+
+  _em_modprobe=$(_em_find_kmod_modprobe) \
+    || die ${LINENO} "kmod modprobe not found (need sys-apps/kmod; busybox modprobe cannot target another kver). Set YARAMFS_CFG_PREPARE_MODPROBE if needed."
+
   _em_deps=
   _em_roots=
 
   for _em_name in "$@"; do
     [ -n "${_em_name}" ] || continue
 
-    # -q: builtin/missing → no output + fail; real modules still print insmod lines.
-    _em_out=$("${_em_bb}" modprobe -D -q "${_em_name}" 2>&1) || true
+    _em_out=
+    _em_how=
 
-    if [ -n "$(echo "${_em_out}" | grep -e '^insmod')" ]; then
+    _em_out=$("${_em_modprobe}" -d "${_em_mod_root}" -S "${_em_kver}" -D -q "${_em_name}" 2>/dev/null) || true
+    if _em_insmod_lines_ok "${_em_out}"; then
+      _em_how=kmod
+    else
+      _em_out=
+    fi
+
+    # Safety: locate NAME.ko* under MODULES_DIR (leaf only, no dep resolution).
+    if [ -z "${_em_out}" ]; then
+      _em_ko=$(_em_find_ko "${_em_name}") || true
+      if [ -n "${_em_ko}" ] && [ -f "${_em_ko}" ]; then
+        _em_out="insmod ${_em_ko}"
+        _em_how=find
+        echo "modules: ${_em_name}: found ${_em_ko} (leaf only; add soft deps to PREPARE_MODULES* if needed)" >&2
+      fi
+    fi
+
+    if [ -n "${_em_out}" ]; then
       _em_deps="${_em_deps}${_em_out}
 "
       _em_roots="${_em_roots}${_em_name}
 "
+      [ "${_em_how}" = kmod ] && echo "modules: ${_em_name}: resolved via kmod (${_em_modprobe} -d ${_em_mod_root} -S ${_em_kver})" >&2
     else
-      echo "modules: skip ${_em_name} (builtin, missing, or no insmod paths)" >&2
+      echo "modules: skip ${_em_name} (builtin, missing, or no .ko under ${_em_moddir})" >&2
     fi
   done
 
@@ -121,6 +169,52 @@ EOF
 
   _em_nboot=$(grep -c . "${_em_bootfile}" 2>/dev/null || echo 0)
   echo "modules: ensure copied ${_em_ncopy} new ko, boot list ${_em_nboot} (kver ${_em_kver})" >&2
+}
+
+# Locate kmod's modprobe (not a busybox applet). Prints path or returns 1.
+_em_find_kmod_modprobe() {
+  _ef_cand=
+  if [ -n "${YARAMFS_CFG_PREPARE_MODPROBE:-}" ]; then
+    _ef_cand=${YARAMFS_CFG_PREPARE_MODPROBE}
+    if [ -x "${_ef_cand}" ] && "${_ef_cand}" -V 2>&1 | head -n1 | grep -qi kmod; then
+      printf '%s\n' "${_ef_cand}"
+      return 0
+    fi
+    return 1
+  fi
+  for _ef_cand in /sbin/modprobe /usr/sbin/modprobe /bin/modprobe /usr/bin/modprobe; do
+    [ -x "${_ef_cand}" ] || continue
+    # busybox applets often report "BusyBox v..." — reject those.
+    if "${_ef_cand}" -V 2>&1 | head -n1 | grep -qi kmod; then
+      printf '%s\n' "${_ef_cand}"
+      return 0
+    fi
+  done
+  # Last resort: PATH, still require kmod banner.
+  _ef_cand=$(command -v modprobe 2>/dev/null) || true
+  if [ -n "${_ef_cand}" ] && [ -x "${_ef_cand}" ] \
+    && "${_ef_cand}" -V 2>&1 | head -n1 | grep -qi kmod; then
+    printf '%s\n' "${_ef_cand}"
+    return 0
+  fi
+  return 1
+}
+
+# True if arg has at least one "insmod path" line.
+_em_insmod_lines_ok() {
+  [ -n "$(echo "$1" | grep -e '^insmod[[:space:]]\{1,\}[^[:space:]]')" ]
+}
+
+# Find NAME.ko / NAME.ko.gz / … under $_em_moddir. Prints one absolute path.
+_em_find_ko() {
+  _ef_name=$1
+  find "${_em_moddir}" -type f \( \
+      -name "${_ef_name}.ko" -o \
+      -name "${_ef_name}.ko.gz" -o \
+      -name "${_ef_name}.ko.xz" -o \
+      -name "${_ef_name}.ko.zst" -o \
+      -name "${_ef_name}.ko.bz2" \
+    \) 2>/dev/null | head -n1
 }
 
 prepare_or_boot "$@"

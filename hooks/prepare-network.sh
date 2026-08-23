@@ -4,7 +4,7 @@
 # Host network drivers → YARAMFS_CFG_PREPARE_MODULES_ADDL for the modules hook.
 # Default: lsmod names whose modinfo -n path contains "/net/"
 # (e.g. …/drivers/net/ethernet/…/igb.ko, …/net/8021q/8021q.ko).
-# ensure_modules pulls deps via modprobe -D. No root required.
+# ensure_modules pulls deps via kmod modprobe -d/-S -D. No root required.
 # Override: YARAMFS_CFG_PREPARE_NETWORK_MODULES="mlx5_core igb" (empty = none).
 
 prepare() {

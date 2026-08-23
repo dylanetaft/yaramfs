@@ -4,7 +4,7 @@
 # Host input drivers → YARAMFS_CFG_PREPARE_MODULES_ADDL for the modules hook.
 # Default: lsmod names whose modinfo -n path contains "/input/" or "/hid/"
 # (e.g. …/drivers/input/…/hyperv_keyboard.ko, …/drivers/hid/hid-hyperv.ko).
-# ensure_modules pulls deps via modprobe -D. No root required.
+# ensure_modules pulls deps via kmod modprobe -d/-S -D. No root required.
 # Override: YARAMFS_CFG_PREPARE_INPUT_MODULES="usbhid atkbd" (empty = none).
 
 prepare() {

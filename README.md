@@ -37,7 +37,7 @@ Optional env overrides (examples):
 YARAMFS_CFG_PREPARE_MODULES="foo bar" ./prepare.sh
 YARAMFS_CFG_PREPARE_KERNEL=/path/to/Image YARAMFS_CFG_PREPARE_QEMU_APPEND="console=ttyAMA0 rdinit=/init root=UUID=..." ./prepare.sh
 ```
-Mininally required host tools: busybox, proot, lddtree, cpio, gzip/pigz
+Minimally required host tools: busybox, proot, lddtree, cpio, gzip/pigz, kmod (modprobe)
 
 ## Hooks
 Order below matches a typical `config/` layout (00 → 99). Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
@@ -87,10 +87,14 @@ Host dropbear package installed (`dropbear`, `dbclient`, `dropbearkey`, `dropbea
      - No-op (prepare-only in config naming)
 
 ### modules
+##### Requires (prepare)
+Host **kmod** `modprobe` (`sys-apps/kmod`). Busybox modprobe is not used for resolution (no usable `-d` / other-kver support). Busybox is still used for `depmod -b` in the build tree.
 ##### Phases
   - Prepare
-     - Resolves deps with busybox modprobe -D, copies .ko into build, runs depmod
-     - Writes boot list to `etc/yaramfs-modules` in the image
+     - Resolves each name against `YARAMFS_CFG_PREPARE_MODULES_DIR` (target kver), not necessarily the running kernel:
+       1. kmod `modprobe -d ROOT -S KVER -D -q` (ROOT = parent of `lib/modules/KVER`)
+       2. safety: `find` `NAME.ko*` under `MODULES_DIR` (leaf only — list soft deps in `YARAMFS_CFG_PREPARE_MODULES*` if needed)
+     - Copies .ko into build, runs busybox `depmod -b`; writes boot list to `etc/yaramfs-modules`
   - Boot
      - modprobe each name in `/etc/yaramfs-modules` (warn and continue on failure)
 
@@ -200,4 +204,50 @@ On `add` / preinst it runs:
 ```sh
 YARAMFS_CFG_PREPARE_KERNEL_VERSION=$ver YARAMFS_CFG_PREPARE_OUT_CPIO=$STAGING/initrd $yaramfs_root/prepare.sh
 ```
-`YARAMFS_CFG_PREPARE_KERNEL` is unset so the qemu hook is skipped. Staging is `${KERNEL_INSTALL_STAGING_AREA}` (systemd) or `${INSTALLKERNEL_STAGING_AREA}` (Gentoo).
+`YARAMFS_CFG_PREPARE_KERNEL` is unset so the qemu hook is skipped. Staging is `${KERNEL_INSTALL_STAGING_AREA}` (systemd) or `${INSTALLKERNEL_STAGING_AREA}` (Gentoo). Writing the initrd under `/var/tmp/kernel-install.staging.*` is normal; installkernel (or ukify) promotes it to the final boot path afterward.
+
+### Recovery chroot (rebuild initrd / UKI from live media)
+If the installed system will not boot, mount its root from a live/recovery environment and chroot before running `kernel-install` or `prepare.sh`. Bare `installkernel` / `uname -r` often pick the **live** kernel, not the one on disk.
+
+```sh
+# Adjust devices and mountpoints. Example: root on /mnt/gentoo, ESP or /boot as needed.
+mount /dev/ROOT  /mnt/gentoo
+mount /dev/ESP   /mnt/gentoo/boot    # or /mnt/gentoo/efi — match your layout
+
+mount -t proc  proc  /mnt/gentoo/proc
+mount -t sysfs sys   /mnt/gentoo/sys
+mount --rbind  /dev  /mnt/gentoo/dev
+mount --make-rslave  /mnt/gentoo/dev 2>/dev/null || true
+# UEFI vars if anything touches Secure Boot / efibootmgr:
+# mount --rbind /sys/firmware/efi/efivars /mnt/gentoo/sys/firmware/efi/efivars
+
+chroot /mnt/gentoo /bin/bash
+source /etc/profile
+```
+
+Inside the chroot, use the **installed** kernel version and image (e.g. `gentoo-kernel-bin`), not the recovery kernel:
+
+```sh
+ls /lib/modules/
+# gentoo-kernel-bin example:
+KVER=7.1.8-gentoo-dist-bin          # your version under /lib/modules
+IMG=/usr/lib/modules/${KVER}/vmlinuz
+test -d "/lib/modules/${KVER}" && test -f "${IMG}"
+
+# Argument order matters: add VERSION IMAGE (not IMAGE alone).
+kernel-install -v add "${KVER}" "${IMG}"
+# Or: emerge --config sys-kernel/gentoo-kernel-bin
+```
+
+**proc and proot:** prepare uses host `proot` for `busybox --install` inside the build tree. If `/proc` is missing in the chroot, proot fails with errors like `can't retrieve loader path proc/self/fd`. Fix mounts (`mount -t proc proc /mnt/gentoo/proc`) before chrooting; `ls /proc/self/fd` must work inside the chroot.
+
+**Memory / ukify:** yaramfs only builds the staged initrd. With `uki_generator=ukify`, `60-ukify.install` then assembles a UKI and can use a lot of RAM (kernel + full initrd + stub). In a small recovery environment this often dies as `60-ukify.install terminated by signal kill` (OOM), even when the same machine succeeds after a normal boot. Check `dmesg | grep -i oom`, add swap if needed, and retry; or skip UKI for recovery (`layout=bls` / `grub` without `uki_generator=ukify`) and install separate `vmlinuz` + initrd, or run `ukify build` manually once RAM/swap is adequate.
+
+**Initrd only** (bypass installkernel), still with an explicit kver:
+
+```sh
+YARAMFS_CFG_PREPARE_KERNEL_VERSION=${KVER} \
+YARAMFS_CFG_PREPARE_MODULES_DIR=/lib/modules/${KVER} \
+YARAMFS_CFG_PREPARE_OUT_CPIO=/boot/initramfs-${KVER}.img \
+/opt/yaramfs/prepare.sh
+```

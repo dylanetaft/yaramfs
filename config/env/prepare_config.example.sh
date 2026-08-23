@@ -89,11 +89,18 @@
 # set this yourself to append (e.g. virtio for qemu netroot tests).
 #YARAMFS_CFG_PREPARE_MODULES_ADDL="virtio_net virtio_pci"
 
-# Kernel version for the host module tree (default: uname -r).
+# Kernel version for the module tree to pack (default: uname -r).
+# installkernel sets this to the kernel being installed (may differ from uname -r).
 #YARAMFS_CFG_PREPARE_KERNEL_VERSION=
 
-# Host modules directory (default: /lib/modules/$YARAMFS_CFG_PREPARE_KERNEL_VERSION).
+# Modules directory (default: /lib/modules/$YARAMFS_CFG_PREPARE_KERNEL_VERSION).
+# Must look like …/lib/modules/<kver>. Resolution uses kmod only:
+#   modprobe -d ROOT -S KVER -D   (ROOT = parent of lib/modules/KVER)
+# so installkernel/chroot can pack a non-running kver. Busybox modprobe is not used.
 #YARAMFS_CFG_PREPARE_MODULES_DIR=
+
+# Optional path to kmod modprobe if not on PATH / shadowed by busybox.
+#YARAMFS_CFG_PREPARE_MODPROBE=/sbin/modprobe
 
 # =============================================================================
 # boot-provisioned-config
