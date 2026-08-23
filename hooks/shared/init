@@ -71,22 +71,16 @@ print_recovery_banner() {
   echo "yaramfs:   Exit the shell to attempt switch_root; if not ready, shell opens again." >&2
 }
 
-# Child shell only — does not exec over PID 1. Busybox setsid needs -w to wait.
+# Foreground child only — never exec over PID 1 (exit would panic the kernel).
+# Plain sh is enough: /init waits, then retries switch_root. No setsid (-w is
+# util-linux only; busybox setsid may also return before the shell exits).
 recovery_shell_child() {
   echo "yaramfs: dropping to recovery shell" >&2
   trap '' INT
   trap '' QUIT
 
   if [ -c /dev/console ]; then
-    if command -v cttyhack >/dev/null 2>&1; then
-      setsid -w cttyhack sh -i <>/dev/console 2>&1 \
-        || setsid -w sh -i <>/dev/console 2>&1 \
-        || sh -i <>/dev/console 2>&1
-    else
-      sh -i <>/dev/console 2>&1
-    fi
-  elif command -v cttyhack >/dev/null 2>&1; then
-    setsid -w cttyhack sh -i || sh -i
+    sh -i <>/dev/console 2>&1
   else
     sh -i
   fi
