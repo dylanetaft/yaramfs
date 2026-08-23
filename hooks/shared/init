@@ -87,19 +87,23 @@ recovery_shell_child() {
 }
 
 # Boot hooks run as children; /init stays PID 1 for rescue + switch_root.
+_boot_hooks_ok=1
 if ! for_each_hook boot; then
   echo "yaramfs: boot hooks failed" >&2
+  _boot_hooks_ok=0
 fi
 
 trap '' INT
 trap '' QUIT
 
-# Try switch_root when newroot looks ready (hooks may have set NEWROOT even
-# after a later hook failed). Else child recovery shell; on exit, retry.
+# If any boot hook failed, open recovery at least once even when NEWROOT is
+# already mounted (e.g. boot-force-debug after a successful boot-root). Exit
+# the shell to retry switch_root. Clean boot: switch_root immediately when ready.
 while :; do
-  if try_switch_root_from_state; then
+  if [ "${_boot_hooks_ok}" -eq 1 ] && try_switch_root_from_state; then
     : # unreachable: success is exec switch_root
   fi
+  _boot_hooks_ok=1
   print_recovery_banner
   recovery_shell_child
 done

@@ -10,7 +10,7 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 ## How it works
 - `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order. Stock links use steps of 5 (`00`, `05`, …) so intermediate numbers stay free for custom hooks.
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
-- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted. If not, it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
+- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted and hooks succeeded. On hook failure (or missing root), it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
 - Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_PREPARE_MODULES_ADDL`).
 - Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREPARE_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
@@ -185,16 +185,17 @@ If boot hooks fail or nothing mounted a usable root, `/init` **stays PID 1** and
 
 If root is still not ready, the banner and shell open again (no kernel panic from exiting the recovery shell). Env vars set inside the child shell are **not** visible to PID 1; use the mountpoint or marker files above.
 
-On each loop iteration `/init` also accepts `YARAMFS_CFG_BOOT_NEWROOT` already exported by an earlier hook (e.g. boot-root succeeded, a later hook failed) and may `switch_root` without opening a shell.
+If boot hooks all succeed, `/init` `switch_root`s when NEWROOT looks ready. If any hook failed, it opens recovery first (even if boot-root already mounted root); exit the shell to retry `switch_root`.
 
 ### boot-force-debug
-Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config order is after boot-root (65); renumber to stop earlier in the sequence.
+Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config order is after boot-root (65); that still works — a failed hook forces recovery before `switch_root`. Renumber earlier only if you want to stop before root is mounted.
 ##### Phases
   - Prepare
      - No-op
   - Boot
      - If `YARAMFS_CFG_BOOT_FORCE_DEBUG` is non-empty: `die` (hook fails → recovery shell)
      - Unset/empty: no-op (safe when the config symlink is left in place)
+     - Must be present in the provisioned/baked `boot_config.sh` as a `YARAMFS_CFG_BOOT_*` var (not only prepare_config)
 
 ### prepare-cpio
 ##### Phases

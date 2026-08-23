@@ -168,8 +168,11 @@
 # =============================================================================
 # boot-force-debug
 # Non-empty → this boot hook dies; guest /init opens a child recovery shell
-# (PID 1 stays /init; exit shell to retry switch_root).
+# (PID 1 stays /init; exit shell to retry switch_root). Works even after
+# boot-root mounted root (failed hooks force recovery before switch_root).
 # Leave unset/empty for normal boot (config/65-boot-force-debug.sh may stay linked).
+# Put this in provisioned boot_config.sh (or prepare_config so it is saved to
+# boot_config.sh) — only YARAMFS_CFG_BOOT_* reach the guest.
 # =============================================================================
 
 #YARAMFS_CFG_BOOT_FORCE_DEBUG=1
