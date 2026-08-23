@@ -162,7 +162,8 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
 ##### prepare-multipath (prepare-only)
   - Prepare
      - Appends multipath modules to `YARAMFS_CFG_PREPARE_MODULES_ADDL`
-     - Installs `multipath` only (libdevmapper via `install_binary`; no dmsetup/kpartx/multipathd)
+     - Installs `multipath` (libdevmapper via `install_binary`; no dmsetup/kpartx/multipathd)
+     - Packs host multipath plugins (`libchecktur.so`, prioritizers, …) from `…/multipath/` at the same path in the image (required for path checkers; not ELF deps of the binary). Override dir: `YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR`
      - Empty `/etc/multipath` and `/var/lib/multipath` (clean room)
      - Optional: `YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/path/to/multipath.conf` bakes `/etc/multipath.conf` (off by default; CLI applies blacklist/`find_multipaths` without multipathd)
   - Boot

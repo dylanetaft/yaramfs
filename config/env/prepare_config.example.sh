@@ -187,6 +187,11 @@
 # Built-in multipath modules are always appended to MODULES_ADDL.
 # Extra names: YARAMFS_CFG_PREPARE_MODULES_ADDL (see modules section).
 
+# Plugin dir (libchecktur.so, libprio*.so, …). Default: first of
+# /lib64/multipath, /usr/lib64/multipath, /lib/multipath, … with libcheck*.so.
+# Packed at the same absolute path in the image (dlopen / MULTIPATH_DIR).
+#YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR=/lib64/multipath
+
 # Opt-in: bake a multipath.conf into the image (default: unset = none / clean room).
 # Use a dedicated file or host /etc/multipath.conf. Filtering (blacklist,
 # find_multipaths, …) applies when boot-multipath runs multipath -v2.

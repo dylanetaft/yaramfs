@@ -1,17 +1,51 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# dm-multipath image bits: modules + multipath CLI (not multipathd).
+# dm-multipath image bits: modules + multipath CLI + plugins (not multipathd).
 # Prepare-only (config/NN-prepare-multipath.sh). Must run before modules so
 # MODULES_ADDL is packed. Guest boot is boot-multipath.sh (after iscsi, before
 # boot-root).
 # Clean room by default: no host multipath.conf / wwids / bindings / conf.d.
 # multipath uses libdevmapper (via install_binary); dmsetup/kpartx CLIs not needed.
+# Path checkers/prioritizers are dlopen plugins under …/multipath/ (e.g. tur →
+# libchecktur.so); not ELF NEEDED of the multipath binary — packed separately.
 # The multipath CLI alone is enough to build DM maps at boot; multipathd is only
 # needed later for ongoing path monitoring (not in this image).
 
 # Default module set; kmod pulls further deps. Extra modules: YARAMFS_CFG_PREPARE_MODULES_ADDL.
 MULTIPATH_MODULES_DEFAULT="dm_mod dm_multipath dm_round_robin dm_service_time dm_queue_length scsi_dh_alua scsi_dh_rdac"
+
+# Print host multipath plugin dir (checkers/prios), or fail.
+# Override: YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR. Else first candidate with libcheck*.so.
+_multipath_find_plugindir() {
+  if [ -n "${YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR}" ]; then
+    if [ ! -d "${YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR}" ]; then
+      die ${LINENO} "MULTIPATH_LIBDIR not a directory: ${YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR}"
+    fi
+    printf '%s\n' "${YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR}"
+    return 0
+  fi
+
+  for _mp_d in \
+    /lib64/multipath \
+    /usr/lib64/multipath \
+    /lib/multipath \
+    /usr/lib/multipath \
+    /usr/lib/x86_64-linux-gnu/multipath \
+    /usr/lib/aarch64-linux-gnu/multipath
+  do
+    [ -d "${_mp_d}" ] || continue
+    # Prefer a real checker plugin dir over an empty placeholder.
+    for _mp_c in "${_mp_d}"/libcheck*.so; do
+      if [ -f "${_mp_c}" ]; then
+        printf '%s\n' "${_mp_d}"
+        return 0
+      fi
+      break
+    done
+  done
+  return 1
+}
 
 prepare() {
   BUILD_DIR=${YARAMFS_CFG_PREPARE_BUILD_DIR}
@@ -26,6 +60,22 @@ prepare() {
   export_cfg YARAMFS_CFG_PREPARE_MODULES_ADDL
 
   install_binary "${YARAMFS_CFG_PREPARE_MULTIPATH}" /sbin/multipath
+
+  # Plugins (tur, alua prio, …): same absolute path in the image so compile-time
+  # MULTIPATH_DIR matches. install_binary also flattens each plugin's ELF deps.
+  if ! _mp_plug=$(_multipath_find_plugindir); then
+    die ${LINENO} "multipath plugin dir not found (libcheck*.so); set YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR"
+  fi
+  _mp_nplug=0
+  for _mp_so in "${_mp_plug}"/*.so; do
+    [ -f "${_mp_so}" ] || continue
+    install_binary "${_mp_so}" "${_mp_so}"
+    _mp_nplug=$((_mp_nplug + 1))
+  done
+  if [ "${_mp_nplug}" -eq 0 ]; then
+    die ${LINENO} "no *.so plugins in ${_mp_plug}"
+  fi
+  echo "prepare-multipath: ${_mp_nplug} plugin(s) from ${_mp_plug}" >&2
 
   # Runtime dirs only (empty). boot-multipath also mkdir -p these before multipath -v2.
   mkdir -p "${BUILD_DIR}/etc/multipath"
