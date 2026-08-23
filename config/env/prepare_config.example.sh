@@ -169,15 +169,15 @@
 # boot-force-debug
 # Non-empty → this boot hook dies; guest /init opens a child recovery shell
 # (PID 1 stays /init; exit shell to retry switch_root).
-# Leave unset/empty for normal boot (config/85-boot-force-debug.sh may stay linked).
+# Leave unset/empty for normal boot (config/65-boot-force-debug.sh may stay linked).
 # =============================================================================
 
 #YARAMFS_CFG_BOOT_FORCE_DEBUG=1
 
 # =============================================================================
 # multipath (opt-in pair; both recommended together)
-#   config/32-prepare-multipath.sh  — before modules (MODULES_ADDL + binary)
-#   config/65-boot-multipath.sh     — after boot-iscsi, before boot-root
+#   config/20-prepare-multipath.sh  — before modules (MODULES_ADDL + binary)
+#   config/55-boot-multipath.sh     — after boot-iscsi, before boot-root
 # Packs multipath CLI + modules (no multipathd). boot-multipath runs multipath -v2;
 # failure → recovery shell. multipathd not required; CLI reads multipath.conf.
 # boot-root still prefers /dev/mapper/* for UUID=/LABEL= resolve.

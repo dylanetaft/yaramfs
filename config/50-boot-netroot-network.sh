@@ -1,1 +1,0 @@
-../hooks/boot-netroot-network.sh

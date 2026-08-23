@@ -1,1 +1,0 @@
-../hooks/boot-root.sh

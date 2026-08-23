@@ -8,7 +8,7 @@ While testing iscsi support in dracut, I noticed support was limited to the netw
 Say for example, you want to boot off iscsi, then actually call out to a SAN, and refresh a snapshot before mounting rootfs.  It's easier to do that with ordered scripts.
 
 ## How it works
-- `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order.
+- `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order. Stock links use steps of 5 (`00`, `05`, …) so intermediate numbers stay free for custom hooks.
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
 - Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted. If not, it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
@@ -40,7 +40,7 @@ YARAMFS_CFG_PREPARE_KERNEL=/path/to/Image YARAMFS_CFG_PREPARE_QEMU_APPEND="conso
 Minimally required host tools: busybox, proot, lddtree, cpio, gzip/pigz, kmod (modprobe)
 
 ## Hooks
-Order below matches a typical `config/` layout (00 → 99). Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
+Order below matches the default `config/` layout (stock slots every 5). Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
 
 ### base
 ##### Phases
@@ -129,7 +129,7 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
      - Must run after network is up
 
 ### custom
-Optional escape hatch: copy a host payload directory into the image and optionally run a boot script. Default config order is after netroot (50) and before iscsi (60); renumber the symlink to change timing.
+Optional escape hatch: copy a host payload directory into the image and optionally run a boot script. Default config order is after netroot (40) and before iscsi (50); renumber the symlink to change timing.
 ##### Phases
   - Prepare
      - Copies `CUSTOM_DIR/.` → `build/hooks/env/custom/`
@@ -155,8 +155,8 @@ Optional escape hatch: copy a host payload directory into the image and optional
 No **multipathd**. Host needs multipath-tools. Enable both (order matters):
 
 ```sh
-ln -sf ../hooks/prepare-multipath.sh config/32-prepare-multipath.sh   # before modules
-ln -sf ../hooks/boot-multipath.sh    config/65-boot-multipath.sh      # after iscsi, before boot-root
+ln -sf ../hooks/prepare-multipath.sh config/20-prepare-multipath.sh   # before modules
+ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after iscsi, before boot-root
 ```
 
 ##### prepare-multipath (prepare-only)
@@ -187,7 +187,7 @@ If root is still not ready, the banner and shell open again (no kernel panic fro
 On each loop iteration `/init` also accepts `YARAMFS_CFG_BOOT_NEWROOT` already exported by an earlier hook (e.g. boot-root succeeded, a later hook failed) and may `switch_root` without opening a shell.
 
 ### boot-force-debug
-Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config slot is after boot-root (85); renumber to stop earlier in the sequence.
+Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config order is after boot-root (65); renumber to stop earlier in the sequence.
 ##### Phases
   - Prepare
      - No-op
