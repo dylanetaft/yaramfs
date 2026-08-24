@@ -182,19 +182,21 @@
 # Link hooks/udev.sh from config/NN-udev.sh (not NN-prepare-udev: prepare-only
 # names are omitted from the guest).
 # Prepare: udevadm (install_binary; symlink as systemd-udevd) + dmsetup + host
-# rules from a fixed copylist (DM/block + multipath/kpartx names; missing =
-# skip). Boot: udevd --daemon, trigger, settle. /init killall5's leftover
-# processes (including udevd) before switch_root; /run + udev db still move.
-# Rules for downstream hooks live here (not in multipath). Recommended under
-# multipath-udev; useful alone later for other consumers.
+# rules from UDEV_RULES_COPYLIST (DM/block + multipath names; missing = skip) +
+# install_blob_tree udev (whole hooks/blob/udev tree — not the host list).
+# Boot: udevd --daemon, trigger, settle. /init killall5's leftover processes
+# (including udevd) before switch_root; /run + udev db still move. Rules for
+# downstream hooks live here (not in multipath). Recommended under
+# multipath-udev; useful alone later for others.
 # =============================================================================
 
 #YARAMFS_CFG_PREPARE_UDEVADM=            # path to udevadm (default: which)
 #YARAMFS_CFG_PREPARE_DMSETUP=            # path to dmsetup (default: which)
 #YARAMFS_CFG_PREPARE_UDEV_RULES_DIR=/lib/udev/rules.d
-# Override default copylist basenames (space-separated). Unset = built-in list
-# (50-udev-default, 60-block, 10-dm, 13-dm-disk, 95-dm-notify, multipath/kpartx
-# names). Each name is copied if present on the host; missing is not an error.
+# Override default host-only copylist basenames (space-separated). Unset =
+# built-in (50-udev-default, 60-block, 10-dm, 13-dm-disk, 95-dm-notify,
+# multipath names). Each name is copied if present on the host; missing is not
+# an error. Repo rules/helpers are always packed via install_blob_tree udev.
 #YARAMFS_CFG_PREPARE_UDEV_RULES=
 # Boot settle timeout seconds after trigger / after multipath maps (default 30).
 #YARAMFS_CFG_BOOT_UDEV_SETTLE_TIMEOUT=30
@@ -215,8 +217,10 @@
 # --- multipath-udev (requires udev hook above) ---
 #   prepare-multipath-udev.sh  — before modules (NN-prepare-*)
 #   boot-multipath-udev.sh     — after boot-iscsi, before boot-root
-# Same packing as legacy. Boot: real udev cookies (no DM_DISABLE_UDEV, no db
-# seed); udevadm settle after multipath/kpartx. Prefer this once tested.
+# Same packing as legacy, plus install_blob_tree prepare-multipath-udev
+# (bindings header, multipath-tools LP#2120444). Boot: real udev cookies
+# (no DM_DISABLE_UDEV, no db seed); udevadm settle after multipath/kpartx.
+# Prefer this once tested.
 # =============================================================================
 
 #YARAMFS_CFG_PREPARE_MULTIPATH=          # path to multipath (default: which)

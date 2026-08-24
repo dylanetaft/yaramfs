@@ -5,7 +5,8 @@
 # /sys /run, before modules). Opt-in via config/NN-udev.sh (not NN-prepare-*
 # so the same file is installed in the guest for boot).
 #
-# Prepare: udevadm (+ libs), symlink systemd-udevd, dmsetup, curated host rules.
+# Prepare: udevadm (+ libs), symlink systemd-udevd, dmsetup, host rules from
+# UDEV_RULES_COPYLIST, plus install_blob_tree udev (repo rules/helpers).
 # Boot: systemd-udevd --daemon, coldplug trigger, settle. /init killall5's
 # leftover processes (including udevd) before switch_root; /run is moved with
 # the udev db so sticky/db_persist entries survive for real-root coldplug.
@@ -14,11 +15,11 @@
 #
 # Host needs systemd (udevadm) and device-mapper (dmsetup). Modern systemd uses
 # one multi-call binary; systemd-udevd is a symlink to udevadm in the image.
-
-# Host rule basenames to pack when present (DM/block + multipath/kpartx).
-# Override with YARAMFS_CFG_PREPARE_UDEV_RULES (space-separated). Missing names
-# are skipped (log only) — bake whatever the host has installed.
-UDEV_RULES_COPYLIST="50-udev-default.rules 60-block.rules 10-dm.rules 13-dm-disk.rules 95-dm-notify.rules 11-dm-mpath.rules 40-multipath.rules 56-multipath.rules 62-multipath.rules 65-multipath.rules 66-kpartx.rules"
+#
+# Host-only rule basenames (DM/block + multipath when present on host).
+# Override with YARAMFS_CFG_PREPARE_UDEV_RULES. Missing names are skipped.
+# Repo assets (db_persist, kpartx rules, kpartx_id): hooks/blob/udev — not here.
+UDEV_RULES_COPYLIST="50-udev-default.rules 60-block.rules 10-dm.rules 13-dm-disk.rules 95-dm-notify.rules 11-dm-mpath.rules 40-multipath.rules 56-multipath.rules 62-multipath.rules 65-multipath.rules"
 
 # Print host udev rules directory, or empty.
 _udev_find_rules_dir() {
@@ -87,16 +88,10 @@ prepare() {
     _ncopied=$((_ncopied + 1))
   done
 
-  # Portable db_persist for dm-* across switch_root (some 10-dm.rules already
-  # set this; duplicate OPTIONS+ is harmless). Sticky-bit hand-seed not needed
-  # when boot runs a real daemon.
-  cat >"${BUILD_DIR}/lib/udev/rules.d/11-dm-yaramfs.rules" <<'EOF' \
-    || die ${LINENO} "failed to write 11-dm-yaramfs.rules"
-# yaramfs: keep dm-* udev db entries across switch_root (/run moved to newroot).
-SUBSYSTEM=="block", KERNEL=="dm-[0-9]*", OPTIONS+="db_persist"
-EOF
+  # Repo tree (db_persist, kpartx rules, kpartx_id) — not host copylist.
+  install_blob_tree udev
 
-  echo "udev: prepare: ${_ncopied} rule(s) copied, ${_nskipped} skipped from ${_rules_dir}" >&2
+  echo "udev: prepare: ${_ncopied} host rule(s) copied, ${_nskipped} skipped from ${_rules_dir}" >&2
   echo "udev: prepare: udevadm + systemd-udevd symlink + dmsetup packed" >&2
 }
 

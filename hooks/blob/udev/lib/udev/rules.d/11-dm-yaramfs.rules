@@ -1,0 +1,4 @@
+# yaramfs: keep dm-* udev db entries across switch_root (/run moved to newroot).
+# Some host 10-dm.rules already set db_persist; duplicate OPTIONS+ is harmless.
+# Sticky-bit hand-seed is not needed when boot runs a real udevd.
+SUBSYSTEM=="block", KERNEL=="dm-[0-9]*", OPTIONS+="db_persist"

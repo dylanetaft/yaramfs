@@ -246,6 +246,35 @@ EOF
   echo "install_binary: ${_ib_src} -> ${_ib_dest} (+${_ib_nlib} libs in /lib*)" >&2
 }
 
+# install_blob_tree HOOK_BASENAME
+# Copy hooks/blob/HOOK_BASENAME/. into BUILD_DIR, preserving image-root-relative
+# paths and modes (cp -a). Die if the blob tree is missing or empty of files.
+# Prepare hooks opt in; base does not auto-install every blob.
+install_blob_tree() {
+  _ibt_hook=$1
+  _ibt_build=${YARAMFS_CFG_PREPARE_BUILD_DIR}
+  if [ -z "${_ibt_hook}" ]; then
+    die ${LINENO} "install_blob_tree requires HOOK_BASENAME"
+  fi
+  _ibt_src="hooks/blob/${_ibt_hook}"
+  if [ ! -d "${_ibt_src}" ]; then
+    die ${LINENO} "install_blob_tree: missing ${_ibt_src}"
+  fi
+  # At least one regular file under the tree (avoid packing an empty dir stub).
+  _ibt_any=
+  for _ibt_f in $(find "${_ibt_src}" -type f 2>/dev/null); do
+    _ibt_any=1
+    break
+  done
+  if [ -z "${_ibt_any}" ]; then
+    die ${LINENO} "install_blob_tree: no files under ${_ibt_src}"
+  fi
+  mkdir -p "${_ibt_build}"
+  cp -a "${_ibt_src}/." "${_ibt_build}/" \
+    || die ${LINENO} "install_blob_tree: failed to copy ${_ibt_src} -> ${_ibt_build}"
+  echo "install_blob_tree: ${_ibt_src}/. -> ${_ibt_build}/" >&2
+}
+
 # Config helpers
 # The timing of when they run differs between boot and prepare
 # so we are putting in shared helper

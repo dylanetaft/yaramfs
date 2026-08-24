@@ -151,38 +151,55 @@ Optional escape hatch: copy a host payload directory into the image and optional
      - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
   - After hooks: `/init` runs `killall5` (TERM then KILL), moves proc/sys/dev/run, and `exec switch_root` when newroot is ready.
 
-### multipath (opt-in pair)
-No **multipathd**, no **udevd**. Host needs multipath-tools (`multipath` + `kpartx`). Enable both (relative order matters: prepare before modules; boot after iscsi, before boot-root):
+### multipath (opt-in; pick one pair)
+No **multipathd**. Host needs multipath-tools (`multipath` + `kpartx`). Link **either** the legacy pair **or** the multipath-udev pair (not both). Relative order: prepare before modules; boot after iscsi, before boot-root.
+
+**Legacy** (no udevd; `hooks/contrib/`):
 
 ```sh
-ln -sf ../hooks/prepare-multipath.sh config/NN-prepare-multipath.sh   # before modules
-ln -sf ../hooks/boot-multipath.sh    config/NN-boot-multipath.sh      # after iscsi, before boot-root
+ln -sf ../hooks/contrib/prepare-multipath.sh config/NN-prepare-multipath.sh
+ln -sf ../hooks/contrib/boot-multipath.sh    config/NN-boot-multipath.sh
 ```
 
-##### prepare-multipath (prepare-only)
+**multipath-udev** (requires udev hook; preferred once tested):
+
+```sh
+ln -sf ../hooks/prepare-multipath-udev.sh config/NN-prepare-multipath-udev.sh
+ln -sf ../hooks/boot-multipath-udev.sh    config/NN-boot-multipath-udev.sh
+```
+
+##### prepare-multipath / prepare-multipath-udev (prepare-only)
   - Prepare
      - Appends multipath modules to `YARAMFS_CFG_PREPARE_MODULES_ADDL`
      - Installs `multipath` and `kpartx` (libdevmapper via `install_binary`; no multipathd)
      - Packs host multipath plugins (`libchecktur.so`, prioritizers, …) from `…/multipath/` at the same path in the image (required for path checkers; not ELF deps of the binary). Override dir: `YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR`
      - Empty `/etc/multipath` and `/var/lib/multipath` (clean room)
+     - **prepare-multipath-udev only:** `install_blob_tree prepare-multipath-udev` (bindings header → `/etc/multipath/bindings`, LP#2120444)
      - Optional: `YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/path/to/multipath.conf` bakes `/etc/multipath.conf` (off by default; CLI applies blacklist/`find_multipaths` without multipathd)
   - Boot
      - Not installed in the guest (`NN-prepare-*`)
 
-##### boot-multipath
+##### boot-multipath / boot-multipath-udev
   - Prepare
      - No-op
-  - Boot
+  - Boot (shared)
      - Requires `YARAMFS_CFG_BOOT_MULTIPATH_WWID` (space/comma-separated). Unset/empty → die.
      - Reads sysfs WWID (`/sys/block/sdX/device/wwid` or `…/nvmeXnY/wwid`); matches path disks only
-     - Retries until a match appears or `YARAMFS_CFG_BOOT_MULTIPATH_SETTLE` seconds (default 30; iSCSI/NVMe settle)
-     - Seeds `/etc/multipath/bindings` header if missing (multipath-tools LP#2120444: first run fails on empty/missing file)
-     - `DM_DISABLE_UDEV=1`, then `multipath -v2` on each matched path
-     - `kpartx -a -p -part` on multipath maps (partition nodes `…-partN`; set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
-     - Seeds `/run/udev/data/bM:m` with `DM_UDEV_PRIMARY_SOURCE_FLAG=1` (sticky); `/run` is a tmpfs moved onto newroot so the db survives switch_root for real-root coldplug `/dev/disk/by-uuid`
+     - Retries until maps succeed or `YARAMFS_CFG_BOOT_MULTIPATH_SETTLE` seconds (default 30; path appear + multipath races)
+     - `multipath -v2` on each matched path; `kpartx -a -p -part` on multipath maps (set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
      - Failure → die / recovery shell
+  - Boot (legacy only)
+     - Seeds `/etc/multipath/bindings` header at runtime if missing (LP#2120444)
+     - `DM_DISABLE_UDEV=1`; manual mapper links; seeds `/run/udev/data/bM:m` with `DM_UDEV_PRIMARY_SOURCE_FLAG=1` for real-root coldplug
+  - Boot (multipath-udev only)
+     - Requires udevd already running; real udev cookies (no `DM_DISABLE_UDEV`, no db seed)
+     - Expects `/etc/multipath/bindings` from prepare blob (missing → die)
+     - `udevadm settle` around multipath/kpartx
+     - udev prepare packs host rules from a copylist **and** `install_blob_tree udev` (db_persist, kpartx rules, `kpartx_id`); boot still runs explicit `kpartx -a` for determinism
   - Get a WWID from a path device: `cat /sys/block/sdX/device/wwid`
   - Do **not** mount root from a path partition (`/dev/sdb2`); use the multipath mapper (`…-part2` or `root=UUID=…`)
+
+Static prepare assets: `hooks/blob/<prepare-hook>/` (image-root-relative paths). Prepare hooks call `install_blob_tree` to copy the whole tree; see `hooks/blob/README.md`.
 
 ### Recovery shell
 If boot hooks fail or nothing mounted a usable root, `/init` **stays PID 1** and runs an interactive shell as a **child** (not `exec` over init).

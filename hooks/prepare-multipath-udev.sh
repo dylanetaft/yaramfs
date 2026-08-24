@@ -9,6 +9,7 @@
 # prepare-multipath / boot-multipath (DM_DISABLE_UDEV path).
 #
 # Same packing as prepare-multipath: multipath CLI + kpartx + plugins + modules.
+# Also install_blob_tree prepare-multipath-udev (bindings header, LP#2120444).
 # No multipathd. Rules stay in the udev hook (not here).
 
 MULTIPATH_MODULES_DEFAULT="dm_mod dm_multipath dm_round_robin dm_service_time dm_queue_length scsi_dh_alua scsi_dh_rdac"
@@ -78,6 +79,9 @@ prepare() {
 
   mkdir -p "${BUILD_DIR}/etc/multipath"
   mkdir -p "${BUILD_DIR}/var/lib/multipath"
+
+  # hooks/blob/prepare-multipath-udev (bindings header LP#2120444, mode 0600).
+  install_blob_tree prepare-multipath-udev
 
   if [ -n "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" ]; then
     [ -r "${YARAMFS_CFG_PREPARE_MULTIPATH_CONF}" ] \

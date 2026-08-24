@@ -8,6 +8,7 @@
 #
 # Same WWID allowlist as legacy boot-multipath (YARAMFS_CFG_BOOT_MULTIPATH_WWID).
 # libdevmapper talks to udevd → PRIMARY + mapper links + by-uuid without hand seed.
+# Bindings header from prepare-multipath-udev (hooks/blob/…/bindings), not boot seed.
 # _mp_try_map is one pass/fail attempt; boot() retries until SETTLE seconds.
 
 prepare() { :; }
@@ -82,39 +83,6 @@ _mp_collect_paths() {
   _paths=${_paths# }
 }
 
-# multipath-tools LP#2120444: first run needs BINDINGS_FILE_HEADER byte-for-byte.
-_mp_ensure_bindings_file() {
-  _bf=/etc/multipath/bindings
-  mkdir -p /etc/multipath 2>/dev/null || true
-
-  if [ -f "${_bf}" ] && grep -q 'Multipath bindings, Version' "${_bf}" 2>/dev/null; then
-    return 0
-  fi
-
-  _tmp="${_bf}.tmp.$$"
-  {
-    printf '%s\n' \
-      '# Multipath bindings, Version : 1.0' \
-      '# NOTE: this file is automatically maintained by the multipath program.' \
-      '# You should not need to edit this file in normal circumstances.' \
-      '#' \
-      '# Format:' \
-      '# alias wwid' \
-      '#'
-  } >"${_tmp}" 2>/dev/null || {
-    rm -f "${_tmp}" 2>/dev/null || true
-    echo "yaramfs: multipath-udev: warning: could not write ${_bf} skeleton" >&2
-    return 0
-  }
-  mv -f "${_tmp}" "${_bf}" 2>/dev/null || {
-    rm -f "${_tmp}" 2>/dev/null || true
-    echo "yaramfs: multipath-udev: warning: could not install ${_bf} skeleton" >&2
-    return 0
-  }
-  chmod 0600 "${_bf}" 2>/dev/null || true
-  echo "yaramfs: multipath-udev: seeded ${_bf} header (LP#2120444)" >&2
-}
-
 # One attempt: collect WWID paths → udev settle → multipath -v2.
 # Uses: _allow, _mp_args. Sets _paths / _matched_n via _mp_collect_paths.
 # Returns 0 if at least one multipath succeeded, 1 otherwise (caller retries).
@@ -174,7 +142,10 @@ boot() {
   _udev_settle=${YARAMFS_CFG_BOOT_UDEV_SETTLE_TIMEOUT}
 
   mkdir -p /dev/mapper /etc/multipath /run/multipath /var/lib/multipath 2>/dev/null || true
-  _mp_ensure_bindings_file
+  # Bindings header packed by prepare-multipath-udev (hooks/blob/…/bindings).
+  if [ ! -f /etc/multipath/bindings ]; then
+    die ${LINENO} "/etc/multipath/bindings missing (enable prepare-multipath-udev / rebuild image)"
+  fi
 
   _allow=
   _tok=
