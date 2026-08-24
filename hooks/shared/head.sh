@@ -247,8 +247,11 @@ EOF
 }
 
 # install_blob_tree HOOK_BASENAME
-# Copy hooks/blob/HOOK_BASENAME/. into BUILD_DIR, preserving image-root-relative
-# paths and modes (cp -a). Die if the blob tree is missing or empty of files.
+# Copy each file under hooks/blob/HOOK_BASENAME/ into BUILD_DIR at the same
+# image-root-relative path, preserving modes (cp -a). File-by-file so merged-/usr
+# layout works: base makes build/lib -> usr/lib; a tree cp -a of blob lib/ would
+# try to replace that symlink with a directory.
+# Die if the blob tree is missing or empty of files.
 # Prepare hooks opt in; base does not auto-install every blob.
 install_blob_tree() {
   _ibt_hook=$1
@@ -260,19 +263,32 @@ install_blob_tree() {
   if [ ! -d "${_ibt_src}" ]; then
     die ${LINENO} "install_blob_tree: missing ${_ibt_src}"
   fi
-  # At least one regular file under the tree (avoid packing an empty dir stub).
-  _ibt_any=
-  for _ibt_f in $(find "${_ibt_src}" -type f 2>/dev/null); do
-    _ibt_any=1
-    break
-  done
-  if [ -z "${_ibt_any}" ]; then
+
+  _ibt_n=0
+  # Portable: find -print, read paths (blob paths have no newlines).
+  while IFS= read -r _ibt_f || [ -n "${_ibt_f}" ]; do
+    [ -n "${_ibt_f}" ] || continue
+    [ -f "${_ibt_f}" ] || continue
+    _ibt_rel=${_ibt_f#"${_ibt_src}"/}
+    [ -n "${_ibt_rel}" ] || continue
+    case "${_ibt_rel}" in
+      /*) die ${LINENO} "install_blob_tree: bad relative path from ${_ibt_f}" ;;
+    esac
+    _ibt_dest="${_ibt_build}/${_ibt_rel}"
+    # mkdir -p follows build/lib -> usr/lib (does not replace the symlink).
+    mkdir -p "$(dirname "${_ibt_dest}")" \
+      || die ${LINENO} "install_blob_tree: mkdir failed for ${_ibt_dest}"
+    cp -a "${_ibt_f}" "${_ibt_dest}" \
+      || die ${LINENO} "install_blob_tree: failed ${_ibt_f} -> ${_ibt_dest}"
+    _ibt_n=$((_ibt_n + 1))
+  done <<EOF
+$(find "${_ibt_src}" -type f 2>/dev/null)
+EOF
+
+  if [ "${_ibt_n}" -eq 0 ]; then
     die ${LINENO} "install_blob_tree: no files under ${_ibt_src}"
   fi
-  mkdir -p "${_ibt_build}"
-  cp -a "${_ibt_src}/." "${_ibt_build}/" \
-    || die ${LINENO} "install_blob_tree: failed to copy ${_ibt_src} -> ${_ibt_build}"
-  echo "install_blob_tree: ${_ibt_src}/. -> ${_ibt_build}/" >&2
+  echo "install_blob_tree: ${_ibt_src} -> ${_ibt_build}/ (${_ibt_n} file(s))" >&2
 }
 
 # Config helpers

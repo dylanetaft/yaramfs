@@ -10,8 +10,8 @@ hooks/blob/<prepare-hook-basename>/…
 
 - Directory name matches the **prepare** hook that installs the files (e.g. `udev`, `prepare-multipath-udev`), not the boot hook and not `NN-…` config symlink names.
 - Paths under that directory are **initramfs-root-relative** (`etc/multipath/bindings` → image `/etc/multipath/bindings`).
-- Modes are preserved (`cp -a`); set `chmod` on the blob files in git as needed (e.g. bindings `0600`, `kpartx_id` `0755`).
-- Nothing here is auto-copied by `base`. Each prepare hook calls `install_blob_tree <basename>` from `hooks/shared/head.sh`, which copies the whole tree into `BUILD_DIR` (no file enumeration).
+- Modes are preserved (`cp -a` per file); set `chmod` on the blob files in git as needed (e.g. bindings `0600`, `kpartx_id` `0755`).
+- Nothing here is auto-copied by `base`. Each prepare hook calls `install_blob_tree <basename>` from `hooks/shared/head.sh`, which copies each file into `BUILD_DIR` (no file list in the hook). File-by-file so `build/lib` → `usr/lib` is not replaced by a real `lib/` directory.
 
 ## Guests
 
