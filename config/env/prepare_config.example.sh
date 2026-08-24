@@ -209,6 +209,8 @@
 # Same WWID on every path to one LUN/namespace (both iscsi paths → one entry).
 # Unset/empty → die (no multipath-all mode).
 #YARAMFS_CFG_BOOT_MULTIPATH_WWID="naa.60060160deadbeef eui.0123…"
+# Seconds to wait for allowlisted disks after iSCSI/NVMe (default 30).
+#YARAMFS_CFG_BOOT_MULTIPATH_SETTLE=30
 # Optional extra multipath CLI args (e.g. -i).
 #YARAMFS_CFG_BOOT_MULTIPATH_ARGS=
 # kpartx after maps (default 1). Set 0 to skip (whole-disk root/LVM only).

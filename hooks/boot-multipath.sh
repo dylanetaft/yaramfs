@@ -7,8 +7,9 @@
 # boot-root prefers /dev/mapper/* when resolving UUID=/LABEL=.
 #
 # Required: YARAMFS_CFG_BOOT_MULTIPATH_WWID (space- or comma-separated sysfs wwids).
-# Only whole disks whose sysfs wwid matches are passed to multipath.
-# Then kpartx maps partitions on mpath disks (…-partN by default).
+# Only path disks whose sysfs wwid matches are passed to multipath.
+# Waits up to YARAMFS_CFG_BOOT_MULTIPATH_SETTLE seconds for paths (iSCSI/NVMe
+# often appear after session start). Then kpartx on mpath disks (…-partN).
 
 prepare() { :; }
 
@@ -56,6 +57,41 @@ _mp_is_whole_disk() {
   esac
 }
 
+# Scan /sys/block for allowlisted path disks. Sets _paths and _matched_n.
+# $1 = space-separated already-normalized allowlist tokens.
+_mp_collect_paths() {
+  _allow=$1
+  _paths=
+  _matched_n=0
+  for _sys in /sys/block/*; do
+    [ -d "${_sys}" ] || continue
+    _bn=$(basename "${_sys}")
+    _mp_is_whole_disk "${_bn}" || continue
+    _raw=$(_mp_sysfs_wwid "${_bn}")
+    [ -n "${_raw}" ] || continue
+    _nw=$(_mp_norm_wwid "${_raw}")
+    [ -n "${_nw}" ] || continue
+
+    _ok=
+    for _a in ${_allow}; do
+      if _mp_wwid_eq "${_nw}" "${_a}"; then
+        _ok=1
+        break
+      fi
+    done
+    [ -n "${_ok}" ] || continue
+
+    _dev="/dev/${_bn}"
+    if [ ! -b "${_dev}" ] && [ ! -e "${_dev}" ]; then
+      echo "yaramfs: multipath: matched ${_bn} wwid=${_raw} but ${_dev} missing" >&2
+      continue
+    fi
+    _paths="${_paths} ${_dev}"
+    _matched_n=$((_matched_n + 1))
+  done
+  _paths=${_paths# }
+}
+
 # Ensure /dev/mapper/<name> for multipath maps and kpartx partitions (no udevd).
 # Whole disk uuid: mpath-… ; kpartx parts: partN-mpath-… (or name already set).
 _mp_ensure_mapper_nodes() {
@@ -99,7 +135,10 @@ boot() {
 
   default_if_unset YARAMFS_CFG_BOOT_MULTIPATH_KPARTX "1" ${LINENO}
   default_if_unset YARAMFS_CFG_BOOT_MULTIPATH_KPARTX_DELIM "-part" ${LINENO}
+  # Seconds to wait for allowlisted path disks after iSCSI/NVMe (default 30).
+  default_if_unset YARAMFS_CFG_BOOT_MULTIPATH_SETTLE "30" ${LINENO}
   _mp_args=${YARAMFS_CFG_BOOT_MULTIPATH_ARGS-}
+  _settle=${YARAMFS_CFG_BOOT_MULTIPATH_SETTLE}
 
   export DM_DISABLE_UDEV=1
   mkdir -p /dev/mapper /etc/multipath /run/multipath /var/lib/multipath 2>/dev/null || true
@@ -119,41 +158,28 @@ boot() {
     die ${LINENO} "YARAMFS_CFG_BOOT_MULTIPATH_WWID has no usable tokens"
   fi
 
-  # Match whole disks in /sys/block against allowlist.
-  _paths=
-  _matched_n=0
-  for _sys in /sys/block/*; do
-    [ -d "${_sys}" ] || continue
-    _bn=$(basename "${_sys}")
-    _mp_is_whole_disk "${_bn}" || continue
-    _raw=$(_mp_sysfs_wwid "${_bn}")
-    [ -n "${_raw}" ] || continue
-    _nw=$(_mp_norm_wwid "${_raw}")
-    [ -n "${_nw}" ] || continue
-
-    _ok=
-    for _a in ${_allow}; do
-      if _mp_wwid_eq "${_nw}" "${_a}"; then
-        _ok=1
-        break
-      fi
-    done
-    [ -n "${_ok}" ] || continue
-
-    _dev="/dev/${_bn}"
-    if [ ! -b "${_dev}" ] && [ ! -e "${_dev}" ]; then
-      echo "yaramfs: multipath: matched ${_bn} wwid=${_raw} but ${_dev} missing" >&2
-      continue
+  # Retry until at least one path matches or settle budget expires (like rootdelay).
+  _n=0
+  while :; do
+    _mp_collect_paths "${_allow}"
+    if [ "${_matched_n}" -gt 0 ]; then
+      break
     fi
-    echo "yaramfs: multipath: path ${_dev} wwid=${_raw}" >&2
-    _paths="${_paths} ${_dev}"
-    _matched_n=$((_matched_n + 1))
+    if [ "${_n}" -ge "${_settle}" ]; then
+      die ${LINENO} "no path disks match YARAMFS_CFG_BOOT_MULTIPATH_WWID after ${_settle}s"
+    fi
+    sleep 1
+    _n=$((_n + 1))
+    if [ $((_n % 5)) -eq 0 ] || [ "${_n}" -eq 1 ]; then
+      echo "yaramfs: multipath: waiting for WWID paths (${_n}/${_settle}s)" >&2
+    fi
   done
-  _paths=${_paths# }
 
-  if [ "${_matched_n}" -eq 0 ]; then
-    die ${LINENO} "no whole-disk paths match YARAMFS_CFG_BOOT_MULTIPATH_WWID"
-  fi
+  for _dev in ${_paths}; do
+    _bn=$(basename "${_dev}")
+    _raw=$(_mp_sysfs_wwid "${_bn}")
+    echo "yaramfs: multipath: path ${_dev} wwid=${_raw}" >&2
+  done
 
   _ok_n=0
   for _dev in ${_paths}; do

@@ -174,7 +174,8 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
      - No-op
   - Boot
      - Requires `YARAMFS_CFG_BOOT_MULTIPATH_WWID` (space/comma-separated). Unset/empty → die.
-     - Reads sysfs WWID (`/sys/block/sdX/device/wwid` or `…/nvmeXnY/wwid`); matches whole disks only
+     - Reads sysfs WWID (`/sys/block/sdX/device/wwid` or `…/nvmeXnY/wwid`); matches path disks only
+     - Retries until a match appears or `YARAMFS_CFG_BOOT_MULTIPATH_SETTLE` seconds (default 30; iSCSI/NVMe settle)
      - `DM_DISABLE_UDEV=1`, then `multipath -v2` on each matched path
      - `kpartx -a -p -part` on multipath maps (partition nodes `…-partN`; set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
      - Failure → die / recovery shell
