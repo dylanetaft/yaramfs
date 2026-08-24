@@ -63,6 +63,14 @@ boot() {
   mount -t devtmpfs devtmpfs /dev
   mkdir -p /dev/pts
   mount -t devpts devpts /dev/pts 2>/dev/null || true
+  # Separate tmpfs so /init can mount --move /run onto newroot before switch_root.
+  # Plain dir on rootfs is not a mountpoint → move skipped → multipath udev db
+  # seeds and other /run state die with the initramfs. mode=0755 matches systemd.
+  mkdir -p /run
+  if ! mountpoint -q /run 2>/dev/null; then
+    mount -t tmpfs -o mode=0755,nodev,nosuid,strictatime tmpfs /run \
+      || die ${LINENO} "mount tmpfs on /run failed"
+  fi
   mkdir -p /tmp
   mount -t tmpfs tmpfs /tmp 2>/dev/null || true
 

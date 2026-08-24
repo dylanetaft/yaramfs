@@ -48,7 +48,7 @@ Order below matches the default `config/` layout (stock slots every 5). Paramete
      - Creates initramfs directories in build, installs busybox in image path
      - Installs guest `/init` and copies non-prepare-only hooks into the image
   - Boot
-    - Mounts needed directories - devtmpfs, proc, tmpfs, etc
+    - Mounts needed directories — proc, sysfs, devtmpfs, `/run` tmpfs (moved to newroot on switch_root), `/tmp` tmpfs
     - Loads baked `hooks/env/boot_config.sh` (`YARAMFS_CFG_BOOT_*` from prepare-cpio) and `export_cfg` so later boot hooks inherit them (no preserve/restore; file is the source of truth)
 
 ### prepare-network
@@ -178,6 +178,7 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
      - Retries until a match appears or `YARAMFS_CFG_BOOT_MULTIPATH_SETTLE` seconds (default 30; iSCSI/NVMe settle)
      - `DM_DISABLE_UDEV=1`, then `multipath -v2` on each matched path
      - `kpartx -a -p -part` on multipath maps (partition nodes `…-partN`; set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
+     - Seeds `/run/udev/data/bM:m` with `DM_UDEV_PRIMARY_SOURCE_FLAG=1` (sticky); `/run` is a tmpfs moved onto newroot so the db survives switch_root for real-root coldplug `/dev/disk/by-uuid`
      - Failure → die / recovery shell
   - Get a WWID from a path device: `cat /sys/block/sdX/device/wwid`
   - Do **not** mount root from a path partition (`/dev/sdb2`); use the multipath mapper (`…-part2` or `root=UUID=…`)
