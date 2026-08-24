@@ -6,8 +6,9 @@
 # so the same file is installed in the guest for boot).
 #
 # Prepare: udevadm (+ libs), symlink systemd-udevd, dmsetup, curated host rules.
-# Boot: systemd-udevd --daemon, coldplug trigger, settle. Leave daemon running
-# through switch_root; /run tmpfs is moved to newroot with the udev db.
+# Boot: systemd-udevd --daemon, coldplug trigger, settle. /init killall5's
+# leftover processes (including udevd) before switch_root; /run is moved with
+# the udev db so sticky/db_persist entries survive for real-root coldplug.
 # Downstream: multipath-udev (no DM_DISABLE_UDEV). Rules for DM/multipath live
 # here — not in multipath hooks.
 #
@@ -129,7 +130,8 @@ boot() {
   default_if_unset YARAMFS_CFG_BOOT_UDEV_SETTLE_TIMEOUT "30" ${LINENO}
   _settle=${YARAMFS_CFG_BOOT_UDEV_SETTLE_TIMEOUT}
 
-  # /run is tmpfs from base; db lives under here and survives switch_root move.
+  # /run is tmpfs from base; db lives under here and is moved on switch_root.
+  # udevd itself is stopped by /init (killall5) before switch_root.
   mkdir -p /run/udev /dev/mapper /etc/udev/rules.d 2>/dev/null || true
 
   echo "yaramfs: udev: starting ${_udevd} --daemon" >&2

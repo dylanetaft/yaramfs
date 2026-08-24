@@ -10,7 +10,7 @@ Say for example, you want to boot off iscsi, then actually call out to a SAN, an
 ## How it works
 - `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order. Concrete layouts for different use cases will be documented later as example config directory copies (slot numbers are not fixed).
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
-- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted and hooks succeeded. On hook failure (or missing root), it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
+- Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted and hooks succeeded. Before `switch_root`, `/init` runs busybox `killall5` (TERM, then KILL) so initramfs daemons outside PID 1's session (e.g. udevd) do not survive into the real root; kernel threads and the init session are skipped. `/run` is still moved so the udev db can persist. On hook failure (or missing root), it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
 - Hooks may `export_cfg VAR` so the parent runner picks up variables for later hooks (e.g. `YARAMFS_CFG_PREPARE_MODULES_ADDL`).
 - Shared helpers live in `hooks/shared/head.sh`. Defaults: `YARAMFS_CFG_PREPARE_BUILD_DIR=build`, `YARAMFS_CFG_CONFIG_DIR=config`.
@@ -149,7 +149,7 @@ Optional escape hatch: copy a host payload directory into the image and optional
      - `root=/dev/…` — use that block node as-is
      - `root=UUID=…` / `LABEL=…` — busybox `blkid`; prefer `/dev/mapper/*` (multipath maps), else first other match
      - export_cfg YARAMFS_CFG_BOOT_NEWROOT and YARAMFS_CFG_BOOT_INIT for PID 1
-  - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root` when newroot is ready.
+  - After hooks: `/init` runs `killall5` (TERM then KILL), moves proc/sys/dev/run, and `exec switch_root` when newroot is ready.
 
 ### multipath (opt-in pair)
 No **multipathd**, no **udevd**. Host needs multipath-tools (`multipath` + `kpartx`). Enable both (relative order matters: prepare before modules; boot after iscsi, before boot-root):

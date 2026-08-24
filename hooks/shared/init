@@ -49,6 +49,16 @@ try_switch_root_from_state() {
   _nr=${_tsr_newroot}
   _init=${_tsr_init}
 
+  # Drop leftover initramfs processes before tearing down the old root.
+  # busybox killall5: signal all userspace outside this session; skips kernel
+  # threads and PID 1's session (this /init). Daemons that double-fork (udevd)
+  # get a new session and are stopped; real root starts its own. /run (and
+  # sticky udev db) still move after this.
+  echo "yaramfs: stopping leftover processes before switch_root" >&2
+  killall5 -TERM 2>/dev/null || true
+  sleep 1
+  killall5 -KILL 2>/dev/null || true
+
   for _d in proc sys dev run; do
     if [ -d "${_nr}/${_d}" ] && mountpoint -q "/${_d}" 2>/dev/null; then
       mount --move "/${_d}" "${_nr}/${_d}" 2>/dev/null \

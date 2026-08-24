@@ -183,9 +183,10 @@
 # names are omitted from the guest).
 # Prepare: udevadm (install_binary; symlink as systemd-udevd) + dmsetup + host
 # rules from a fixed copylist (DM/block + multipath/kpartx names; missing =
-# skip). Boot: udevd --daemon, trigger, settle. Rules for downstream hooks
-# live here (not in multipath). Recommended under multipath-udev; useful alone
-# later for other consumers.
+# skip). Boot: udevd --daemon, trigger, settle. /init killall5's leftover
+# processes (including udevd) before switch_root; /run + udev db still move.
+# Rules for downstream hooks live here (not in multipath). Recommended under
+# multipath-udev; useful alone later for other consumers.
 # =============================================================================
 
 #YARAMFS_CFG_PREPARE_UDEVADM=            # path to udevadm (default: which)
