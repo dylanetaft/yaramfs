@@ -181,12 +181,15 @@
 # multipath (opt-in pair; both recommended together)
 #   config/20-prepare-multipath.sh  — before modules (MODULES_ADDL + binary)
 #   config/55-boot-multipath.sh     — after boot-iscsi, before boot-root
-# Packs multipath CLI + modules (no multipathd). boot-multipath runs multipath -v2;
+# Packs multipath CLI + kpartx + modules (no multipathd, no udevd).
+# boot-multipath: WWID allowlist → multipath on matching whole disks → kpartx.
 # failure → recovery shell. multipathd not required; CLI reads multipath.conf.
 # boot-root still prefers /dev/mapper/* for UUID=/LABEL= resolve.
+# Do not mount root from path partitions (/dev/sdb2); use mapper …-partN.
 # =============================================================================
 
 #YARAMFS_CFG_PREPARE_MULTIPATH=          # path to multipath (default: which)
+#YARAMFS_CFG_PREPARE_KPARTX=             # path to kpartx (default: which)
 # Built-in multipath modules are always appended to MODULES_ADDL.
 # Extra names: YARAMFS_CFG_PREPARE_MODULES_ADDL (see modules section).
 
@@ -199,6 +202,19 @@
 # Use a dedicated file or host /etc/multipath.conf. Filtering (blacklist,
 # find_multipaths, …) applies when boot-multipath runs multipath -v2.
 #YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/etc/multipath.conf
+
+# --- boot-multipath (baked into boot_config via YARAMFS_CFG_BOOT_*) ---
+# Required when boot-multipath is linked. Space- or comma-separated.
+# Read from a path: cat /sys/block/sdX/device/wwid  or  …/nvme0n1/wwid
+# Same WWID on every path to one LUN/namespace (both iscsi paths → one entry).
+# Unset/empty → die (no multipath-all mode).
+#YARAMFS_CFG_BOOT_MULTIPATH_WWID="naa.60060160deadbeef eui.0123…"
+# Optional extra multipath CLI args (e.g. -i).
+#YARAMFS_CFG_BOOT_MULTIPATH_ARGS=
+# kpartx after maps (default 1). Set 0 to skip (whole-disk root/LVM only).
+#YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=1
+# kpartx -p delimiter (default -part → /dev/mapper/<id>-part2).
+#YARAMFS_CFG_BOOT_MULTIPATH_KPARTX_DELIM=-part
 
 # =============================================================================
 # boot-root

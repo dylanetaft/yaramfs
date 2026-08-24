@@ -152,7 +152,7 @@ Optional escape hatch: copy a host payload directory into the image and optional
   - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root` when newroot is ready.
 
 ### multipath (opt-in pair)
-No **multipathd**. Host needs multipath-tools. Enable both (order matters):
+No **multipathd**, no **udevd**. Host needs multipath-tools (`multipath` + `kpartx`). Enable both (order matters):
 
 ```sh
 ln -sf ../hooks/prepare-multipath.sh config/20-prepare-multipath.sh   # before modules
@@ -162,7 +162,7 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
 ##### prepare-multipath (prepare-only)
   - Prepare
      - Appends multipath modules to `YARAMFS_CFG_PREPARE_MODULES_ADDL`
-     - Installs `multipath` (libdevmapper via `install_binary`; no dmsetup/kpartx/multipathd)
+     - Installs `multipath` and `kpartx` (libdevmapper via `install_binary`; no multipathd)
      - Packs host multipath plugins (`libchecktur.so`, prioritizers, …) from `…/multipath/` at the same path in the image (required for path checkers; not ELF deps of the binary). Override dir: `YARAMFS_CFG_PREPARE_MULTIPATH_LIBDIR`
      - Empty `/etc/multipath` and `/var/lib/multipath` (clean room)
      - Optional: `YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/path/to/multipath.conf` bakes `/etc/multipath.conf` (off by default; CLI applies blacklist/`find_multipaths` without multipathd)
@@ -173,7 +173,13 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
   - Prepare
      - No-op
   - Boot
-     - `multipath -v2` (failure → die / recovery shell)
+     - Requires `YARAMFS_CFG_BOOT_MULTIPATH_WWID` (space/comma-separated). Unset/empty → die.
+     - Reads sysfs WWID (`/sys/block/sdX/device/wwid` or `…/nvmeXnY/wwid`); matches whole disks only
+     - `DM_DISABLE_UDEV=1`, then `multipath -v2` on each matched path
+     - `kpartx -a -p -part` on multipath maps (partition nodes `…-partN`; set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
+     - Failure → die / recovery shell
+  - Get a WWID from a path device: `cat /sys/block/sdX/device/wwid`
+  - Do **not** mount root from a path partition (`/dev/sdb2`); use the multipath mapper (`…-part2` or `root=UUID=…`)
 
 ### Recovery shell
 If boot hooks fail or nothing mounted a usable root, `/init` **stays PID 1** and runs an interactive shell as a **child** (not `exec` over init).

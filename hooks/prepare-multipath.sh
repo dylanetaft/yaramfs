@@ -1,16 +1,18 @@
 #!/bin/sh
 . hooks/shared/head.sh
 
-# dm-multipath image bits: modules + multipath CLI + plugins (not multipathd).
+# dm-multipath image bits: modules + multipath CLI + kpartx + plugins (not multipathd).
 # Prepare-only (config/NN-prepare-multipath.sh). Must run before modules so
 # MODULES_ADDL is packed. Guest boot is boot-multipath.sh (after iscsi, before
 # boot-root).
 # Clean room by default: no host multipath.conf / wwids / bindings / conf.d.
-# multipath uses libdevmapper (via install_binary); dmsetup/kpartx CLIs not needed.
+# multipath uses libdevmapper (via install_binary). kpartx is packed so boot can
+# map partitions on multipath disks (root on …-partN) without udevd.
 # Path checkers/prioritizers are dlopen plugins under …/multipath/ (e.g. tur →
 # libchecktur.so); not ELF NEEDED of the multipath binary — packed separately.
-# The multipath CLI alone is enough to build DM maps at boot; multipathd is only
-# needed later for ongoing path monitoring (not in this image).
+# The multipath CLI alone builds DM maps at boot; multipathd is only needed later
+# for ongoing path monitoring (not in this image).
+# Boot filters paths by YARAMFS_CFG_BOOT_MULTIPATH_WWID (sysfs wwid; required).
 
 # Default module set; kmod pulls further deps. Extra modules: YARAMFS_CFG_PREPARE_MODULES_ADDL.
 MULTIPATH_MODULES_DEFAULT="dm_mod dm_multipath dm_round_robin dm_service_time dm_queue_length scsi_dh_alua scsi_dh_rdac"
@@ -60,6 +62,13 @@ prepare() {
   export_cfg YARAMFS_CFG_PREPARE_MODULES_ADDL
 
   install_binary "${YARAMFS_CFG_PREPARE_MULTIPATH}" /sbin/multipath
+
+  # kpartx: partition maps on multipath whole disks (boot-multipath, after multipath).
+  default_value YARAMFS_CFG_PREPARE_KPARTX "$(which kpartx 2>/dev/null)" ${LINENO}
+  if [ ! -x "${YARAMFS_CFG_PREPARE_KPARTX}" ]; then
+    die ${LINENO} "kpartx not executable: ${YARAMFS_CFG_PREPARE_KPARTX:-"(unset)"} (install multipath-tools or set YARAMFS_CFG_PREPARE_KPARTX)"
+  fi
+  install_binary "${YARAMFS_CFG_PREPARE_KPARTX}" /sbin/kpartx
 
   # Plugins (tur, alua prio, …): same absolute path in the image so compile-time
   # MULTIPATH_DIR matches. install_binary also flattens each plugin's ELF deps.
