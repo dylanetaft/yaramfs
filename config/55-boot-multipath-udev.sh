@@ -1,0 +1,1 @@
+../hooks/boot-multipath-udev.sh
