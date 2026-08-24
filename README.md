@@ -176,6 +176,7 @@ ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after is
      - Requires `YARAMFS_CFG_BOOT_MULTIPATH_WWID` (space/comma-separated). Unset/empty → die.
      - Reads sysfs WWID (`/sys/block/sdX/device/wwid` or `…/nvmeXnY/wwid`); matches path disks only
      - Retries until a match appears or `YARAMFS_CFG_BOOT_MULTIPATH_SETTLE` seconds (default 30; iSCSI/NVMe settle)
+     - Seeds `/etc/multipath/bindings` header if missing (multipath-tools LP#2120444: first run fails on empty/missing file)
      - `DM_DISABLE_UDEV=1`, then `multipath -v2` on each matched path
      - `kpartx -a -p -part` on multipath maps (partition nodes `…-partN`; set `YARAMFS_CFG_BOOT_MULTIPATH_KPARTX=0` to skip)
      - Seeds `/run/udev/data/bM:m` with `DM_UDEV_PRIMARY_SOURCE_FLAG=1` (sticky); `/run` is a tmpfs moved onto newroot so the db survives switch_root for real-root coldplug `/dev/disk/by-uuid`

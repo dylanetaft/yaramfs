@@ -94,6 +94,48 @@ _mp_collect_paths() {
   _paths=${_paths# }
 }
 
+# Ensure /etc/multipath/bindings has the exact header multipath-tools expects.
+#
+# Newer multipath (≈0.11+) fread()s a fixed BINDINGS_FILE_HEADER and strcmp()s
+# it; missing or empty file → "_check_bindings_file: failed to read header" and
+# a non-zero exit on the *first* multipath run.  That run often still rewrites a
+# good skeleton, so a manual re-run succeeds — classic initramfs footgun.
+# See Ubuntu LP#2120444 (same message with multipathd -B; CLI multipath -v2 too).
+# touch is not enough: header must match alias.c BINDINGS_FILE_HEADER byte-for-byte.
+# No alias/wwid lines required for the check; leave an existing good file alone.
+_mp_ensure_bindings_file() {
+  _bf=/etc/multipath/bindings
+  mkdir -p /etc/multipath 2>/dev/null || true
+
+  # Already has the Version header line → multipath can parse it.
+  if [ -f "${_bf}" ] && grep -q 'Multipath bindings, Version' "${_bf}" 2>/dev/null; then
+    return 0
+  fi
+
+  _tmp="${_bf}.tmp.$$"
+  {
+    printf '%s\n' \
+      '# Multipath bindings, Version : 1.0' \
+      '# NOTE: this file is automatically maintained by the multipath program.' \
+      '# You should not need to edit this file in normal circumstances.' \
+      '#' \
+      '# Format:' \
+      '# alias wwid' \
+      '#'
+  } >"${_tmp}" 2>/dev/null || {
+    rm -f "${_tmp}" 2>/dev/null || true
+    echo "yaramfs: multipath: warning: could not write ${_bf} skeleton" >&2
+    return 0
+  }
+  mv -f "${_tmp}" "${_bf}" 2>/dev/null || {
+    rm -f "${_tmp}" 2>/dev/null || true
+    echo "yaramfs: multipath: warning: could not install ${_bf} skeleton" >&2
+    return 0
+  }
+  chmod 0600 "${_bf}" 2>/dev/null || true
+  echo "yaramfs: multipath: seeded ${_bf} header (LP#2120444)" >&2
+}
+
 # Ensure /dev/mapper/<name> for multipath maps and kpartx partitions (no udevd).
 # Whole disk uuid: mpath-… ; kpartx parts: partN-mpath-… (or name already set).
 _mp_ensure_mapper_nodes() {
@@ -261,6 +303,8 @@ boot() {
 
   export DM_DISABLE_UDEV=1
   mkdir -p /dev/mapper /etc/multipath /run/multipath /var/lib/multipath 2>/dev/null || true
+  # Before first multipath -v2: valid bindings header (see _mp_ensure_bindings_file).
+  _mp_ensure_bindings_file
 
   # Build normalized allowlist (space/comma separated).
   _allow=
