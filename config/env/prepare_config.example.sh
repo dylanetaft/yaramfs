@@ -170,7 +170,7 @@
 # Non-empty → this boot hook dies; guest /init opens a child recovery shell
 # (PID 1 stays /init; exit shell to retry switch_root). Works even after
 # boot-root mounted root (failed hooks force recovery before switch_root).
-# Leave unset/empty for normal boot (config/65-boot-force-debug.sh may stay linked).
+# Leave unset/empty for normal boot (force-debug config symlink may stay linked).
 # Put this in provisioned boot_config.sh (or prepare_config so it is saved to
 # boot_config.sh) — only YARAMFS_CFG_BOOT_* reach the guest.
 # =============================================================================
@@ -178,14 +178,44 @@
 #YARAMFS_CFG_BOOT_FORCE_DEBUG=1
 
 # =============================================================================
-# multipath (opt-in pair; both recommended together)
-#   config/20-prepare-multipath.sh  — before modules (MODULES_ADDL + binary)
-#   config/55-boot-multipath.sh     — after boot-iscsi, before boot-root
-# Packs multipath CLI + kpartx + modules (no multipathd, no udevd).
-# boot-multipath: WWID allowlist → multipath on matching whole disks → kpartx.
-# failure → recovery shell. multipathd not required; CLI reads multipath.conf.
+# udev (opt-in dual-phase; early — after base, before modules)
+# Link hooks/udev.sh from config/NN-udev.sh (not NN-prepare-udev: prepare-only
+# names are omitted from the guest).
+# Prepare: udevadm (install_binary; symlink as systemd-udevd) + dmsetup + host
+# rules from a fixed copylist (DM/block + multipath/kpartx names; missing =
+# skip). Boot: udevd --daemon, trigger, settle. Rules for downstream hooks
+# live here (not in multipath). Recommended under multipath-udev; useful alone
+# later for other consumers.
+# =============================================================================
+
+#YARAMFS_CFG_PREPARE_UDEVADM=            # path to udevadm (default: which)
+#YARAMFS_CFG_PREPARE_DMSETUP=            # path to dmsetup (default: which)
+#YARAMFS_CFG_PREPARE_UDEV_RULES_DIR=/lib/udev/rules.d
+# Override default copylist basenames (space-separated). Unset = built-in list
+# (50-udev-default, 60-block, 10-dm, 13-dm-disk, 95-dm-notify, multipath/kpartx
+# names). Each name is copied if present on the host; missing is not an error.
+#YARAMFS_CFG_PREPARE_UDEV_RULES=
+# Boot settle timeout seconds after trigger / after multipath maps (default 30).
+#YARAMFS_CFG_BOOT_UDEV_SETTLE_TIMEOUT=30
+
+# =============================================================================
+# multipath — pick ONE pair (legacy no-udev OR multipath-udev). Not both.
 # boot-root still prefers /dev/mapper/* for UUID=/LABEL= resolve.
 # Do not mount root from path partitions (/dev/sdb2); use mapper …-partN.
+# Same YARAMFS_CFG_*_MULTIPATH_* names for both pairs.
+# =============================================================================
+#
+# --- legacy (no udevd; known-working) ---
+#   prepare-multipath.sh  — before modules (NN-prepare-*)
+#   boot-multipath.sh     — after boot-iscsi, before boot-root
+# Packs multipath CLI + kpartx + modules. Boot: DM_DISABLE_UDEV + manual mapper
+# links + seed /run/udev/data for real-root coldplug. multipathd not required.
+#
+# --- multipath-udev (requires udev hook above) ---
+#   prepare-multipath-udev.sh  — before modules (NN-prepare-*)
+#   boot-multipath-udev.sh     — after boot-iscsi, before boot-root
+# Same packing as legacy. Boot: real udev cookies (no DM_DISABLE_UDEV, no db
+# seed); udevadm settle after multipath/kpartx. Prefer this once tested.
 # =============================================================================
 
 #YARAMFS_CFG_PREPARE_MULTIPATH=          # path to multipath (default: which)
@@ -200,11 +230,11 @@
 
 # Opt-in: bake a multipath.conf into the image (default: unset = none / clean room).
 # Use a dedicated file or host /etc/multipath.conf. Filtering (blacklist,
-# find_multipaths, …) applies when boot-multipath runs multipath -v2.
+# find_multipaths, …) applies when multipath -v2 runs at boot.
 #YARAMFS_CFG_PREPARE_MULTIPATH_CONF=/etc/multipath.conf
 
-# --- boot-multipath (baked into boot_config via YARAMFS_CFG_BOOT_*) ---
-# Required when boot-multipath is linked. Space- or comma-separated.
+# --- boot multipath (legacy or -udev; baked via YARAMFS_CFG_BOOT_*) ---
+# Required when either boot-multipath* is linked. Space- or comma-separated.
 # Read from a path: cat /sys/block/sdX/device/wwid  or  …/nvme0n1/wwid
 # Same WWID on every path to one LUN/namespace (both iscsi paths → one entry).
 # Unset/empty → die (no multipath-all mode).

@@ -8,7 +8,7 @@ While testing iscsi support in dracut, I noticed support was limited to the netw
 Say for example, you want to boot off iscsi, then actually call out to a SAN, and refresh a snapshot before mounting rootfs.  It's easier to do that with ordered scripts.
 
 ## How it works
-- `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order. Stock links use steps of 5 (`00`, `05`, …) so intermediate numbers stay free for custom hooks.
+- `config/` holds numbered symlinks into `hooks/`. Lexicographic order is run order. Concrete layouts for different use cases will be documented later as example config directory copies (slot numbers are not fixed).
 - `./prepare.sh` runs each hook's **prepare** phase (build the image tree, then cpio).
 - Guest `/init` runs each hook's **boot** phase, then `switch_root` if root was mounted and hooks succeeded. On hook failure (or missing root), it opens a **child** recovery shell (PID 1 stays `/init`); exiting the shell retries `switch_root`.
 - Names matching `NN-prepare-*` are prepare-only (copied into the image is skipped for boot).
@@ -40,7 +40,7 @@ YARAMFS_CFG_PREPARE_KERNEL=/path/to/Image YARAMFS_CFG_PREPARE_QEMU_APPEND="conso
 Minimally required host tools: busybox, proot, lddtree, cpio, gzip/pigz, kmod (modprobe)
 
 ## Hooks
-Order below matches the default `config/` layout (stock slots every 5). Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
+Catalog by hook name (not a fixed run sequence). Relative constraints are noted where needed. Parameters: see [`config/env/prepare_config.example.sh`](config/env/prepare_config.example.sh).
 
 ### base
 ##### Phases
@@ -99,7 +99,7 @@ Host **kmod** `modprobe` (`sys-apps/kmod`). Busybox modprobe is not used for res
      - modprobe each name in `/etc/yaramfs-modules` (warn and continue on failure)
 
 ### boot-provisioned-config
-Optional override of the baked boot env from a file on a local filesystem (e.g. USB). Order is after modules and before network/iscsi.
+Optional override of the baked boot env from a file on a local filesystem (e.g. USB). Needs drivers already loaded (modules); place before network/iscsi if those hooks should see the provisioned env.
 ##### Phases
   - Prepare
      - No-op
@@ -129,7 +129,7 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
      - Must run after network is up
 
 ### custom
-Optional escape hatch: copy a host payload directory into the image and optionally run a boot script. Default config order is after netroot (40) and before iscsi (50); renumber the symlink to change timing.
+Optional escape hatch: copy a host payload directory into the image and optionally run a boot script. Place the config symlink wherever the payload should run relative to other boot hooks.
 ##### Phases
   - Prepare
      - Copies `CUSTOM_DIR/.` → `build/hooks/env/custom/`
@@ -152,11 +152,11 @@ Optional escape hatch: copy a host payload directory into the image and optional
   - After hooks: `/init` moves proc/sys/dev/run and `exec switch_root` when newroot is ready.
 
 ### multipath (opt-in pair)
-No **multipathd**, no **udevd**. Host needs multipath-tools (`multipath` + `kpartx`). Enable both (order matters):
+No **multipathd**, no **udevd**. Host needs multipath-tools (`multipath` + `kpartx`). Enable both (relative order matters: prepare before modules; boot after iscsi, before boot-root):
 
 ```sh
-ln -sf ../hooks/prepare-multipath.sh config/20-prepare-multipath.sh   # before modules
-ln -sf ../hooks/boot-multipath.sh    config/55-boot-multipath.sh      # after iscsi, before boot-root
+ln -sf ../hooks/prepare-multipath.sh config/NN-prepare-multipath.sh   # before modules
+ln -sf ../hooks/boot-multipath.sh    config/NN-boot-multipath.sh      # after iscsi, before boot-root
 ```
 
 ##### prepare-multipath (prepare-only)
@@ -197,7 +197,7 @@ If root is still not ready, the banner and shell open again (no kernel panic fro
 If boot hooks all succeed, `/init` `switch_root`s when NEWROOT looks ready. If any hook failed, it opens recovery first (even if boot-root already mounted root); exit the shell to retry `switch_root`.
 
 ### boot-force-debug
-Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. Default config order is after boot-root (65); that still works — a failed hook forces recovery before `switch_root`. Renumber earlier only if you want to stop before root is mounted.
+Opt-in forced boot failure so guest `/init` opens the resumable recovery shell. A failed hook forces recovery before `switch_root` even if boot-root already mounted root. Place earlier only if you want to stop before root is mounted.
 ##### Phases
   - Prepare
      - No-op

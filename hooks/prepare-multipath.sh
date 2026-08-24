@@ -2,9 +2,9 @@
 . hooks/shared/head.sh
 
 # dm-multipath image bits: modules + multipath CLI + kpartx + plugins (not multipathd).
-# Prepare-only (config/NN-prepare-multipath.sh). Must run before modules so
-# MODULES_ADDL is packed. Guest boot is boot-multipath.sh (after iscsi, before
-# boot-root).
+# LEGACY no-udev path (config/NN-prepare-multipath.sh). Prefer prepare-multipath-udev
+# + udev once tested. Must run before modules so MODULES_ADDL is packed.
+# Guest boot is boot-multipath.sh (after iscsi, before boot-root).
 # Clean room by default: no host multipath.conf / wwids / bindings / conf.d.
 # multipath uses libdevmapper (via install_binary). kpartx is packed so boot can
 # map partitions on multipath disks (root on …-partN) without udevd.

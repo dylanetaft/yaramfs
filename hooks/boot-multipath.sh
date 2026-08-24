@@ -2,9 +2,11 @@
 . hooks/shared/head.sh
 
 # One-shot multipath map setup before boot-root resolves/mounts root.
+# LEGACY no-udev path. Prefer boot-multipath-udev + udev once tested.
 # Requires prepare-multipath (multipath + kpartx + modules). No multipathd, no udev.
 # Config order: after modules and path providers (boot-iscsi), before boot-root.
 # boot-root prefers /dev/mapper/* when resolving UUID=/LABEL=.
+# Do not also link boot-multipath-udev.
 #
 # Required: YARAMFS_CFG_BOOT_MULTIPATH_WWID (space- or comma-separated sysfs wwids).
 # Only path disks whose sysfs wwid matches are passed to multipath.

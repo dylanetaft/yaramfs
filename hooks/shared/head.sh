@@ -224,6 +224,20 @@ install_binary() {
     mkdir -p "${_ib_build}${_ib_dir}"
     # Dereference host symlinks so the image gets a real file (ld-linux, .so links).
     cp -aL "${_ib_p}" "${_ib_build}${_ib_dir}/${_ib_base}"
+    # PT_INTERP is often /lib/ld-linux-*.so while the flat copy lands in /lib64
+    # (ELF64). aarch64 Gentoo and others need the interpreter at the exact path.
+    case "${_ib_base}" in
+      ld-linux*.so*)
+        case "${_ib_p}" in
+          /*)
+            if [ ! -e "${_ib_build}${_ib_p}" ]; then
+              mkdir -p "${_ib_build}/$(dirname "${_ib_p}")"
+              cp -aL "${_ib_p}" "${_ib_build}${_ib_p}"
+            fi
+            ;;
+        esac
+        ;;
+    esac
     _ib_nlib=$((_ib_nlib + 1))
   done <<EOF
 ${_ib_deps}
