@@ -8,6 +8,7 @@
 #
 # Same WWID allowlist as legacy boot-multipath (YARAMFS_CFG_BOOT_MULTIPATH_WWID).
 # libdevmapper talks to udevd → PRIMARY + mapper links + by-uuid without hand seed.
+# _mp_try_map is one pass/fail attempt; boot() retries until SETTLE seconds.
 
 prepare() { :; }
 
@@ -114,6 +115,35 @@ _mp_ensure_bindings_file() {
   echo "yaramfs: multipath-udev: seeded ${_bf} header (LP#2120444)" >&2
 }
 
+# One attempt: collect WWID paths → udev settle → multipath -v2.
+# Uses: _allow, _mp_args. Sets _paths / _matched_n via _mp_collect_paths.
+# Returns 0 if at least one multipath succeeded, 1 otherwise (caller retries).
+# No udevadm trigger: udevd already watches kernel uevents; re-ADD can hurt.
+_mp_try_map() {
+  _mp_collect_paths "${_allow}"
+  [ "${_matched_n}" -gt 0 ] || return 1
+
+  for _dev in ${_paths}; do
+    _bn=$(basename "${_dev}")
+    _raw=$(_mp_sysfs_wwid "${_bn}")
+    echo "yaramfs: multipath-udev: path ${_dev} wwid=${_raw}" >&2
+  done
+  # Wait for in-flight udev work on paths that just appeared (iscsi, etc.).
+  udevadm settle --timeout=5 2>/dev/null || true
+
+  _ok_n=0
+  for _dev in ${_paths}; do
+    echo "yaramfs: multipath -v2 ${_mp_args} ${_dev}" >&2
+    # shellcheck disable=SC2086
+    if multipath -v2 ${_mp_args} "${_dev}"; then
+      _ok_n=$((_ok_n + 1))
+    else
+      echo "yaramfs: multipath-udev: multipath failed for ${_dev}" >&2
+    fi
+  done
+  [ "${_ok_n}" -gt 0 ]
+}
+
 boot() {
   if ! command -v multipath >/dev/null 2>&1; then
     echo "yaramfs: multipath binary missing (enable prepare-multipath-udev)" >&2
@@ -159,41 +189,19 @@ boot() {
     die ${LINENO} "YARAMFS_CFG_BOOT_MULTIPATH_WWID has no usable tokens"
   fi
 
+  # Paths may appear late (iSCSI); first multipath may fail until udev/TUR settle.
+  # One attempt function; outer loop only waits and retries.
   _n=0
-  while :; do
-    _mp_collect_paths "${_allow}"
-    if [ "${_matched_n}" -gt 0 ]; then
-      break
-    fi
+  while ! _mp_try_map; do
     if [ "${_n}" -ge "${_settle}" ]; then
-      die ${LINENO} "no path disks match YARAMFS_CFG_BOOT_MULTIPATH_WWID after ${_settle}s"
+      die ${LINENO} "multipath did not map allowlisted WWIDs after ${_settle}s"
     fi
     sleep 1
     _n=$((_n + 1))
     if [ $((_n % 5)) -eq 0 ] || [ "${_n}" -eq 1 ]; then
-      echo "yaramfs: multipath-udev: waiting for WWID paths (${_n}/${_settle}s)" >&2
+      echo "yaramfs: multipath-udev: waiting for multipath maps (${_n}/${_settle}s)" >&2
     fi
   done
-
-  for _dev in ${_paths}; do
-    _bn=$(basename "${_dev}")
-    _raw=$(_mp_sysfs_wwid "${_bn}")
-    echo "yaramfs: multipath-udev: path ${_dev} wwid=${_raw}" >&2
-  done
-
-  _ok_n=0
-  for _dev in ${_paths}; do
-    echo "yaramfs: multipath -v2 ${_mp_args} ${_dev}" >&2
-    # shellcheck disable=SC2086
-    if multipath -v2 ${_mp_args} "${_dev}"; then
-      _ok_n=$((_ok_n + 1))
-    else
-      echo "yaramfs: multipath-udev: multipath failed for ${_dev} (continuing)" >&2
-    fi
-  done
-  if [ "${_ok_n}" -eq 0 ]; then
-    die ${LINENO} "multipath failed for all matched paths"
-  fi
 
   # Let udev process DM cookies / mapper links before kpartx and boot-root.
   if ! udevadm settle --timeout="${_udev_settle}" 2>/dev/null; then
