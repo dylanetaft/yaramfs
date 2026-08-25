@@ -17,11 +17,16 @@ prepare() {
   mkdir "${BUILD_DIR}/dev"
   mkdir "${BUILD_DIR}/run"
   mkdir "${BUILD_DIR}/tmp"
-  mkdir "${BUILD_DIR}/bin"
-  mkdir "${BUILD_DIR}/sbin"
-  # Merged-/usr layout (same idea as the host): libs land under usr/lib*,
-  # ELF interpreter paths like /lib64/ld-linux-*.so stay valid via symlinks.
-  mkdir -p "${BUILD_DIR}/usr/lib" "${BUILD_DIR}/usr/lib64"
+  # Merged-/usr layout (same idea as the host): real dirs under usr/{bin,sbin,lib*};
+  # /bin /sbin /lib /lib64 are symlinks so both PATH (/bin:/sbin) and hardcoded
+  # paths (/usr/bin/ssh, /lib64/ld-linux-*.so) resolve to the same files.
+  mkdir -p \
+    "${BUILD_DIR}/usr/bin" \
+    "${BUILD_DIR}/usr/sbin" \
+    "${BUILD_DIR}/usr/lib" \
+    "${BUILD_DIR}/usr/lib64"
+  ln -s usr/bin "${BUILD_DIR}/bin"
+  ln -s usr/sbin "${BUILD_DIR}/sbin"
   ln -s usr/lib "${BUILD_DIR}/lib"
   ln -s usr/lib64 "${BUILD_DIR}/lib64"
   mkdir -p "${BUILD_DIR}/mnt/root"

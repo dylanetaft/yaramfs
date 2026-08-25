@@ -220,7 +220,7 @@ install_binary() {
     fi
     _ib_dir=$(_install_binary_libdir "${_ib_p}")
     _ib_base=$(basename "${_ib_p}")
-    # build/lib -> usr/lib (base); mkdir -p follows the symlink.
+    # build/{bin,sbin,lib*} -> usr/… (base merged-/usr); mkdir -p follows the symlink.
     mkdir -p "${_ib_build}${_ib_dir}"
     # Dereference host symlinks so the image gets a real file (ld-linux, .so links).
     cp -aL "${_ib_p}" "${_ib_build}${_ib_dir}/${_ib_base}"

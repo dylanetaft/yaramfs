@@ -45,7 +45,7 @@ Catalog by hook name (not a fixed run sequence). Relative constraints are noted 
 ### base
 ##### Phases
   - Prepare
-     - Creates initramfs directories in build, installs busybox in image path
+     - Creates initramfs directories in build (merged-/usr: `bin`→`usr/bin`, `sbin`→`usr/sbin`, `lib`→`usr/lib`, `lib64`→`usr/lib64`), installs busybox in image path
      - Installs guest `/init` and copies non-prepare-only hooks into the image
   - Boot
     - Mounts needed directories — proc, sysfs, devtmpfs, `/run` tmpfs (moved to newroot on switch_root), `/tmp` tmpfs
