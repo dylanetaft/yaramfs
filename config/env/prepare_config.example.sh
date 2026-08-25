@@ -137,6 +137,8 @@
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK=
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_GATEWAY=10.0.2.2
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN=
+#YARAMFS_CFG_BOOT_NETROOT_<macid>_MTU=9000
+# Optional MTU on address iface (and parent to the same value when VLAN). Decimal only.
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_IPV6_ENABLE_RA=1
 # RA-only: leave IP/PREFIX/NETMASK/GATEWAY unset; set IPV6_ENABLE_RA=1
 # Dual-stack: set IPv4 fields and IPV6_ENABLE_RA=1

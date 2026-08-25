@@ -8,10 +8,11 @@
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_GATEWAY
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_MTU             (optional decimal; L3 iface + parent if VLAN)
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_IPV6_ENABLE_RA  (exactly 1 → RA/SLAAC sysctls)
 # L3: static IPv4 (IP + PREFIX/NETMASK) and/or IPV6_ENABLE_RA=1. Need at least one.
 # Unset IPv4/VLAN fields may be filled from iBFT ethernet* with the same MAC.
-# Shared apply: match iface by MAC → up → optional VLAN → optional v4 addr/gw → optional RA.
+# Shared apply: match iface → up → optional VLAN → optional MTU → optional v4 → optional RA.
 # No wait for SLAAC/route. Config order: after modules, before boot-iscsi.
 
 prepare() { :; }
@@ -132,7 +133,7 @@ _netroot_ibft_fill_macid() {
   return 0
 }
 
-# Shared path: CFG for macid → find iface → up → vlan → optional v4 → optional RA sysctls.
+# Shared path: CFG for macid → find iface → up → vlan → optional MTU → optional v4 → optional RA.
 _netroot_apply_macid() {
   _m=$1
   _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid: ${_m}"
@@ -144,6 +145,7 @@ _netroot_apply_macid() {
   _mask=$(_netroot_trim "$(_netroot_cfg_get "${_m}" NETMASK)")
   _gw=$(_netroot_trim "$(_netroot_cfg_get "${_m}" GATEWAY)")
   _vlan=$(_netroot_trim "$(_netroot_cfg_get "${_m}" VLAN)")
+  _mtu=$(_netroot_trim "$(_netroot_cfg_get "${_m}" MTU)")
   _ra=$(_netroot_trim "$(_netroot_cfg_get "${_m}" IPV6_ENABLE_RA)")
 
   if [ -n "${_ip}" ] && ! yaramfs_is_eval_safe "${_ip}"; then
@@ -161,8 +163,16 @@ _netroot_apply_macid() {
   if [ -n "${_vlan}" ] && ! yaramfs_is_eval_safe "${_vlan}"; then
     die ${LINENO} "netroot ${_m}: unsafe VLAN"
   fi
+  if [ -n "${_mtu}" ] && ! yaramfs_is_eval_safe "${_mtu}"; then
+    die ${LINENO} "netroot ${_m}: unsafe MTU"
+  fi
   if [ -n "${_ra}" ] && ! yaramfs_is_eval_safe "${_ra}"; then
     die ${LINENO} "netroot ${_m}: unsafe IPV6_ENABLE_RA"
+  fi
+
+  if [ -n "${_mtu}" ]; then
+    printf '%s\n' "${_mtu}" | grep -Eq '^[0-9]+$' \
+      || die ${LINENO} "netroot ${_m}: MTU must be a decimal integer"
   fi
 
   _ra_on=0
@@ -208,6 +218,16 @@ _netroot_apply_macid() {
     _addr_dev=${_vname}
   fi
 
+  if [ -n "${_mtu}" ]; then
+    # VLAN MTU cannot exceed parent; set parent first when both differ.
+    if [ "${_addr_dev}" != "${_ifname}" ]; then
+      ip link set dev "${_ifname}" mtu "${_mtu}" \
+        || die ${LINENO} "ip link set ${_ifname} mtu ${_mtu} failed"
+    fi
+    ip link set dev "${_addr_dev}" mtu "${_mtu}" \
+      || die ${LINENO} "ip link set ${_addr_dev} mtu ${_mtu} failed"
+  fi
+
   if [ "${_v4_on}" -eq 1 ]; then
     # Idempotent: already-assigned address is OK.
     if ! ip addr show dev "${_addr_dev}" 2>/dev/null | grep -F " ${_ip}/" >/dev/null 2>&1; then
@@ -243,7 +263,7 @@ _netroot_apply_macid() {
   else
     _nr_l3="none"
   fi
-  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_nr_l3} gw=${_gw:-none} vlan=${_vlan:-0} ipv6_ra=${_ra_on}" >&2
+  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_nr_l3} gw=${_gw:-none} vlan=${_vlan:-0} mtu=${_mtu:-default} ipv6_ra=${_ra_on}" >&2
 }
 
 # macids from iBFT ethernet* (if present).
