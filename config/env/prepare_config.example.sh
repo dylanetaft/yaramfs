@@ -120,8 +120,12 @@
 # boot-netroot-network
 # NIC config keyed by MAC id: lowercase hex, no colons
 #   aa:bb:cc:dd:ee:ff → aabbccddeeff
-# Unset fields filled from iBFT ethernet* with the same MAC when present.
-# Pre-set CFG always wins. Optional GATEWAY → default route.
+# L3: static IPv4 (IP + PREFIX or NETMASK) and/or IPV6_ENABLE_RA=1 (exactly 1).
+# Need at least one of IP or IPV6_ENABLE_RA=1. PREFIX/NETMASK/GATEWAY require IP.
+# Unset IPv4/VLAN fields filled from iBFT ethernet* with the same MAC when present.
+# Pre-set CFG always wins. Optional GATEWAY → IPv4 default route.
+# IPV6_ENABLE_RA=1 → disable_ipv6=0, accept_ra=1, autoconf=1 on address iface.
+# No wait for SLAAC/route (later hooks may race; iscsi timeout is a blunt backstop).
 # =============================================================================
 
 # iBFT sysfs root (default: /sys/firmware/ibft). Used to discover MACs / fill unset fields.
@@ -133,6 +137,9 @@
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK=
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_GATEWAY=10.0.2.2
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN=
+#YARAMFS_CFG_BOOT_NETROOT_<macid>_IPV6_ENABLE_RA=1
+# RA-only: leave IP/PREFIX/NETMASK/GATEWAY unset; set IPV6_ENABLE_RA=1
+# Dual-stack: set IPv4 fields and IPV6_ENABLE_RA=1
 
 # Example (qemu SLIRP + YARAMFS_CFG_PREPARE_QEMU_NET_MAC=52:54:00:12:34:56):
 #YARAMFS_CFG_BOOT_NETROOT_525400123456_IP=10.0.2.15

@@ -8,9 +8,11 @@
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_NETMASK
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_GATEWAY
 #   YARAMFS_CFG_BOOT_NETROOT_<macid>_VLAN
-# Unset fields may be filled from iBFT ethernet* with the same MAC.
-# Shared apply path: match iface by MAC → up → optional VLAN → ip addr → optional default route.
-# Config order: after modules, before boot-iscsi.
+#   YARAMFS_CFG_BOOT_NETROOT_<macid>_IPV6_ENABLE_RA  (exactly 1 → RA/SLAAC sysctls)
+# L3: static IPv4 (IP + PREFIX/NETMASK) and/or IPV6_ENABLE_RA=1. Need at least one.
+# Unset IPv4/VLAN fields may be filled from iBFT ethernet* with the same MAC.
+# Shared apply: match iface by MAC → up → optional VLAN → optional v4 addr/gw → optional RA.
+# No wait for SLAAC/route. Config order: after modules, before boot-iscsi.
 
 prepare() { :; }
 
@@ -130,7 +132,7 @@ _netroot_ibft_fill_macid() {
   return 0
 }
 
-# Shared path: CFG for macid → find iface → up → vlan → address → optional default gw.
+# Shared path: CFG for macid → find iface → up → vlan → optional v4 → optional RA sysctls.
 _netroot_apply_macid() {
   _m=$1
   _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid: ${_m}"
@@ -142,9 +144,9 @@ _netroot_apply_macid() {
   _mask=$(_netroot_trim "$(_netroot_cfg_get "${_m}" NETMASK)")
   _gw=$(_netroot_trim "$(_netroot_cfg_get "${_m}" GATEWAY)")
   _vlan=$(_netroot_trim "$(_netroot_cfg_get "${_m}" VLAN)")
+  _ra=$(_netroot_trim "$(_netroot_cfg_get "${_m}" IPV6_ENABLE_RA)")
 
-  [ -n "${_ip}" ] || die ${LINENO} "netroot ${_m}: empty IP"
-  if ! yaramfs_is_eval_safe "${_ip}"; then
+  if [ -n "${_ip}" ] && ! yaramfs_is_eval_safe "${_ip}"; then
     die ${LINENO} "netroot ${_m}: unsafe IP"
   fi
   if [ -n "${_prefix}" ] && ! yaramfs_is_eval_safe "${_prefix}"; then
@@ -159,13 +161,32 @@ _netroot_apply_macid() {
   if [ -n "${_vlan}" ] && ! yaramfs_is_eval_safe "${_vlan}"; then
     die ${LINENO} "netroot ${_m}: unsafe VLAN"
   fi
+  if [ -n "${_ra}" ] && ! yaramfs_is_eval_safe "${_ra}"; then
+    die ${LINENO} "netroot ${_m}: unsafe IPV6_ENABLE_RA"
+  fi
 
-  if [ -z "${_prefix}" ]; then
-    if [ -n "${_mask}" ]; then
-      _prefix=$(_netroot_mask_to_prefix "${_mask}") \
-        || die ${LINENO} "netroot ${_m}: cannot map netmask ${_mask} to prefix"
-    else
-      die ${LINENO} "netroot ${_m}: need PREFIX or NETMASK"
+  _ra_on=0
+  [ "${_ra}" = "1" ] && _ra_on=1
+  _v4_on=0
+  [ -n "${_ip}" ] && _v4_on=1
+
+  if [ "${_v4_on}" -eq 0 ] && [ "${_ra_on}" -eq 0 ]; then
+    die ${LINENO} "netroot ${_m}: need IP and/or IPV6_ENABLE_RA=1"
+  fi
+  if [ "${_v4_on}" -eq 0 ]; then
+    if [ -n "${_prefix}" ] || [ -n "${_mask}" ] || [ -n "${_gw}" ]; then
+      die ${LINENO} "netroot ${_m}: PREFIX/NETMASK/GATEWAY require IP"
+    fi
+  fi
+
+  if [ "${_v4_on}" -eq 1 ]; then
+    if [ -z "${_prefix}" ]; then
+      if [ -n "${_mask}" ]; then
+        _prefix=$(_netroot_mask_to_prefix "${_mask}") \
+          || die ${LINENO} "netroot ${_m}: cannot map netmask ${_mask} to prefix"
+      else
+        die ${LINENO} "netroot ${_m}: need PREFIX or NETMASK"
+      fi
     fi
   fi
 
@@ -187,21 +208,42 @@ _netroot_apply_macid() {
     _addr_dev=${_vname}
   fi
 
-  # Idempotent: already-assigned address is OK.
-  if ! ip addr show dev "${_addr_dev}" 2>/dev/null | grep -F " ${_ip}/" >/dev/null 2>&1; then
-    ip addr add "${_ip}/${_prefix}" dev "${_addr_dev}" \
-      || die ${LINENO} "ip addr add ${_ip}/${_prefix} dev ${_addr_dev} failed"
-  fi
+  if [ "${_v4_on}" -eq 1 ]; then
+    # Idempotent: already-assigned address is OK.
+    if ! ip addr show dev "${_addr_dev}" 2>/dev/null | grep -F " ${_ip}/" >/dev/null 2>&1; then
+      ip addr add "${_ip}/${_prefix}" dev "${_addr_dev}" \
+        || die ${LINENO} "ip addr add ${_ip}/${_prefix} dev ${_addr_dev} failed"
+    fi
 
-  # Optional default route via this NIC's gateway (iBFT or CFG).
-  if [ -n "${_gw}" ]; then
-    if ! ip route show default 2>/dev/null | grep -F " via ${_gw} " >/dev/null 2>&1; then
-      ip route replace default via "${_gw}" dev "${_addr_dev}" \
-        || die ${LINENO} "ip route default via ${_gw} dev ${_addr_dev} failed"
+    # Optional default route via this NIC's gateway (iBFT or CFG).
+    if [ -n "${_gw}" ]; then
+      if ! ip route show default 2>/dev/null | grep -F " via ${_gw} " >/dev/null 2>&1; then
+        ip route replace default via "${_gw}" dev "${_addr_dev}" \
+          || die ${LINENO} "ip route default via ${_gw} dev ${_addr_dev} failed"
+      fi
     fi
   fi
 
-  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_ip}/${_prefix} gw=${_gw:-none} vlan=${_vlan:-0}" >&2
+  if [ "${_ra_on}" -eq 1 ]; then
+    _nr6="/proc/sys/net/ipv6/conf/${_addr_dev}"
+    for _nr6_key in disable_ipv6 accept_ra autoconf; do
+      [ -e "${_nr6}/${_nr6_key}" ] \
+        || die ${LINENO} "netroot ${_m}: missing ${_nr6}/${_nr6_key} (ipv6 disabled?)"
+    done
+    printf '0\n' > "${_nr6}/disable_ipv6" \
+      || die ${LINENO} "netroot ${_m}: disable_ipv6=0 failed"
+    printf '1\n' > "${_nr6}/accept_ra" \
+      || die ${LINENO} "netroot ${_m}: accept_ra=1 failed"
+    printf '1\n' > "${_nr6}/autoconf" \
+      || die ${LINENO} "netroot ${_m}: autoconf=1 failed"
+  fi
+
+  if [ "${_v4_on}" -eq 1 ]; then
+    _nr_l3="${_ip}/${_prefix}"
+  else
+    _nr_l3="none"
+  fi
+  echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_nr_l3} gw=${_gw:-none} vlan=${_vlan:-0} ipv6_ra=${_ra_on}" >&2
 }
 
 # macids from iBFT ethernet* (if present).
