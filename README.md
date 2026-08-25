@@ -86,6 +86,22 @@ Host dropbear package installed (`dropbear`, `dbclient`, `dropbearkey`, `dropbea
   - Boot
      - No-op (prepare-only in config naming)
 
+### prepare-openssh-client
+Minimal OpenSSH **client** for SFTP (and interactive `ssh`). Opt-in: heavier than dropbear mainly due to OpenSSL (`libcrypto`). Use when the remote allows only SFTP (e.g. `ForceCommand internal-sftp`); Dropbear `dbscp` is classic SCP and will not work there.
+##### Requires
+Host OpenSSH client (`ssh`, `sftp`)
+##### Phases
+  - Prepare
+     - `install_binary` `ssh` → `/usr/bin/ssh` and `sftp` → `/usr/bin/sftp` (+ shared libs)
+     - Paths matter: stock `sftp` execs `/usr/bin/ssh`
+     - Does not copy keys, `ssh_config`, known_hosts, FIDO/PKCS11 helpers, or start a server
+  - Boot
+     - No-op (prepare-only in config naming)
+##### Enable
+```sh
+ln -sf ../hooks/prepare-openssh-client.sh config/NN-prepare-openssh-client.sh
+```
+
 ### modules
 ##### Requires (prepare)
 Host **kmod** `modprobe` (`sys-apps/kmod`). Busybox modprobe is not used for resolution (no usable `-d` / other-kver support). Busybox is still used for `depmod -b` in the build tree.

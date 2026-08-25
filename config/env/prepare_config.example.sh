@@ -75,6 +75,16 @@
 #YARAMFS_CFG_PREPARE_DROPBEARCONVERT=
 
 # =============================================================================
+# prepare-openssh-client
+# =============================================================================
+
+# Host OpenSSH client paths (default: which ssh / which sftp). Missing/non-executable fails prepare.
+# Installs into /usr/bin in the image (+ shared libs). sftp expects /usr/bin/ssh at runtime.
+# No keys, known_hosts, ssh_config, sshd, or FIDO/PKCS11 helpers.
+#YARAMFS_CFG_PREPARE_SSH=
+#YARAMFS_CFG_PREPARE_SFTP=
+
+# =============================================================================
 # modules
 # =============================================================================
 
