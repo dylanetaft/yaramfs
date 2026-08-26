@@ -21,6 +21,7 @@ Blobs are not shipped under guest `/hooks/`. Boot hooks assume prepare already p
 
 | Prepare hook | Blob dir | Notes |
 |--------------|----------|--------|
+| `base` | `hooks/blob/base/` | Minimal `/etc/passwd` + `/etc/group` (root 0:0, home `/root`, shell `/bin/sh`) |
 | `prepare-multipath-udev` | `hooks/blob/prepare-multipath-udev/` | multipath-tools `BINDINGS_FILE_HEADER` → `/etc/multipath/bindings` (LP#2120444) |
 | `udev` | `hooks/blob/udev/` | `11-dm-yaramfs.rules` (db_persist), multipath-tools kpartx rules + `kpartx_id` |
 

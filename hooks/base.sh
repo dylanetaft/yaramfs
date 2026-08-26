@@ -35,6 +35,9 @@ prepare() {
   mkdir -p "${BUILD_DIR}/dev/pts"
   mkdir -p "${BUILD_DIR}/hooks"
 
+  # Minimal root identity (uid/gid 0) for getpwuid/getgrgid — e.g. OpenSSH sftp/ssh.
+  install_blob_tree base
+
   install -m 0755 -D "${YARAMFS_CFG_PREPARE_BUSYBOX_PATH}" "${BUILD_DIR}/bin/busybox"
   # Create applet symlinks (including bin/sh) inside the build root.
   LD_PRELOAD= "${YARAMFS_CFG_PREPARE_PROOT}" -r "${BUILD_DIR}" -w / /bin/busybox --install -s /bin \

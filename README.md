@@ -46,6 +46,7 @@ Catalog by hook name (not a fixed run sequence). Relative constraints are noted 
 ##### Phases
   - Prepare
      - Creates initramfs directories in build (merged-/usr: `bin`→`usr/bin`, `sbin`→`usr/sbin`, `lib`→`usr/lib`, `lib64`→`usr/lib64`), installs busybox in image path
+     - `install_blob_tree base`: minimal `/etc/passwd` + `/etc/group` (root 0:0, home `/root`, shell `/bin/sh`) for getpwuid/getgrgid (e.g. OpenSSH client)
      - Installs guest `/init` and copies non-prepare-only hooks into the image
   - Boot
     - Mounts needed directories — proc, sysfs, devtmpfs, `/run` tmpfs (moved to newroot on switch_root), `/tmp` tmpfs
