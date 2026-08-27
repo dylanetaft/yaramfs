@@ -137,7 +137,7 @@ Bring up NIC(s) for netroot using **MAC id** as the config key (lowercase hex, n
      - L3: static IPv4 (`IP` + `PREFIX`/`NETMASK`, optional `GATEWAY`) and/or `IPV6_ENABLE_RA=1` (need at least one)
      - Optional `MTU`: set on address iface (and parent to the same value when VLAN)
      - `IPV6_ENABLE_RA=1`: sysctls on address iface (`disable_ipv6=0`, `accept_ra=1`, `autoconf=1`)
-     - Settle: ping address-iface IPv4 `brd` (from `ip`) or `ff02::1` if no v4 brd; any reply (incl. self) counts; `YARAMFS_CFG_BOOT_NETROOT_SETTLE` seconds (default 30; `0` skips); die on timeout
+     - Settle: ping address-iface IPv4 `brd` (from `ip`) or `ff02::1` if no v4 brd; any reply (incl. self) counts; `YARAMFS_CFG_BOOT_NETROOT_SETTLE` wall-clock seconds via `date +%s` (default 30; `0` skips; `sleep 1` between failed probes); die on timeout
      - Requires NIC drivers (and `iscsi_ibft` if using iBFT) already loaded (modules hook)
 
 ### boot-iscsi

@@ -14,7 +14,7 @@
 # Unset IPv4/VLAN fields may be filled from iBFT ethernet* with the same MAC.
 # Shared apply: match iface → up → optional VLAN → optional MTU → optional v4 → optional RA.
 # Then settle: ping iface brd (IPv4) or ff02::1 (IPv6) until any reply (self OK).
-# YARAMFS_CFG_BOOT_NETROOT_SETTLE = max seconds per iface (default 30; 0 = skip).
+# YARAMFS_CFG_BOOT_NETROOT_SETTLE = wall-clock seconds per iface (default 30; 0 = skip).
 # Config order: after modules, before boot-iscsi.
 
 prepare() { :; }
@@ -154,8 +154,25 @@ _get_netdev_broadcast_addr() {
   return 0
 }
 
-# Ping brd/ff02::1 on DEV until any reply or SETTLE seconds (0 = skip).
-# Each failed ping -W 1 is ~1s; no extra sleep.
+# One settle probe: -W 1 caps a single try (not the settle budget).
+# IPv6 targets (ff02::1, etc.): prefer ping -6, fall back to plain ping.
+_netroot_settle_ping() {
+  _dev=$1
+  _tgt=$2
+  case "${_tgt}" in
+    *:*)
+      ping -6 -c 1 -W 1 -I "${_dev}" "${_tgt}" >/dev/null 2>&1 \
+        || ping -c 1 -W 1 -I "${_dev}" "${_tgt}" >/dev/null 2>&1
+      ;;
+    *)
+      ping -c 1 -W 1 -I "${_dev}" "${_tgt}" >/dev/null 2>&1
+      ;;
+  esac
+}
+
+# Ping brd/ff02::1 on DEV until any reply or SETTLE wall-clock seconds (0 = skip).
+# Budget is date +%s deadline (instant ping fail must not burn the budget).
+# sleep 1 between failures rate-limits probes.
 _netroot_wait_settle() {
   _dev=$1
   _settle=${YARAMFS_CFG_BOOT_NETROOT_SETTLE}
@@ -164,18 +181,36 @@ _netroot_wait_settle() {
   _tgt=$(_get_netdev_broadcast_addr "${_dev}")
   [ -n "${_tgt}" ] || die ${LINENO} "netroot: ${_dev}: empty settle target"
 
+  _start=$(date +%s) || die ${LINENO} "date +%s failed"
+  _deadline=$((_start + _settle))
   _n=0
-  while [ "${_n}" -lt "${_settle}" ]; do
-    if ping -c 1 -W 1 -I "${_dev}" "${_tgt}" >/dev/null 2>&1; then
+  _last_log=-1
+
+  while :; do
+    if _netroot_settle_ping "${_dev}" "${_tgt}"; then
       echo "netroot: ${_dev} settled (ping ${_tgt})" >&2
       return 0
     fi
+
+    _now=$(date +%s) || die ${LINENO} "date +%s failed"
+    _elapsed=$((_now - _start))
     _n=$((_n + 1))
-    if [ "${_n}" -eq 1 ] || [ $((_n % 5)) -eq 0 ]; then
-      echo "yaramfs: netroot: waiting for ${_dev} ping ${_tgt} (${_n}/${_settle}s)" >&2
+
+    # Progress: first fail, then when elapsed crosses 5s boundaries.
+    if [ "${_n}" -eq 1 ] || {
+      [ "${_elapsed}" -ge 5 ] \
+        && [ $((_elapsed / 5)) -gt $((_last_log / 5)) ]
+    }; then
+      echo "yaramfs: netroot: waiting for ${_dev} ping ${_tgt} (${_elapsed}/${_settle}s)" >&2
+      _last_log=${_elapsed}
     fi
+
+    if [ "${_now}" -ge "${_deadline}" ]; then
+      die ${LINENO} "netroot: ${_dev} not ready after ${_settle}s (ping ${_tgt})"
+    fi
+
+    sleep 1
   done
-  die ${LINENO} "netroot: ${_dev} not ready after ${_settle}s (ping ${_tgt})"
 }
 
 # Shared path: CFG for macid → find iface → up → vlan → optional MTU → optional v4 → optional RA → settle.

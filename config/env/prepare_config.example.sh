@@ -141,7 +141,7 @@
 # iBFT sysfs root (default: /sys/firmware/ibft). Used to discover MACs / fill unset fields.
 #YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR=/sys/firmware/ibft
 
-# Max seconds to wait per iface for settle ping (default: 30). 0 = skip settle.
+# Wall-clock seconds to wait per iface for settle ping (default: 30). 0 = skip.
 #YARAMFS_CFG_BOOT_NETROOT_SETTLE=30
 
 # Per-NIC (replace <macid> with e.g. 525400123456):
