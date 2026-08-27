@@ -13,7 +13,9 @@
 # L3: static IPv4 (IP + PREFIX/NETMASK) and/or IPV6_ENABLE_RA=1. Need at least one.
 # Unset IPv4/VLAN fields may be filled from iBFT ethernet* with the same MAC.
 # Shared apply: match iface → up → optional VLAN → optional MTU → optional v4 → optional RA.
-# No wait for SLAAC/route. Config order: after modules, before boot-iscsi.
+# Then settle: ping iface brd (IPv4) or ff02::1 (IPv6) until any reply (self OK).
+# YARAMFS_CFG_BOOT_NETROOT_SETTLE = max seconds per iface (default 30; 0 = skip).
+# Config order: after modules, before boot-iscsi.
 
 prepare() { :; }
 
@@ -133,7 +135,44 @@ _netroot_ibft_fill_macid() {
   return 0
 }
 
-# Shared path: CFG for macid → find iface → up → vlan → optional MTU → optional v4 → optional RA.
+# Print one settle target for DEV: IPv4 brd from ip if present, else ff02::1.
+_get_netdev_broadcast_addr() {
+  _dev=$1
+  _brd=$(ip -o -4 addr show dev "${_dev}" 2>/dev/null \
+    | sed -n 's/.* brd \([^ ]*\).*/\1/p' | head -n1)
+  if [ -n "${_brd}" ]; then
+    printf '%s\n' "${_brd}"
+    return 0
+  fi
+  printf '%s\n' 'ff02::1'
+  return 0
+}
+
+# Ping brd/ff02::1 on DEV until any reply or SETTLE seconds (0 = skip).
+# Each failed ping -W 1 is ~1s; no extra sleep.
+_netroot_wait_settle() {
+  _dev=$1
+  _settle=${YARAMFS_CFG_BOOT_NETROOT_SETTLE}
+  [ "${_settle}" -eq 0 ] 2>/dev/null && return 0
+
+  _tgt=$(_get_netdev_broadcast_addr "${_dev}")
+  [ -n "${_tgt}" ] || die ${LINENO} "netroot: ${_dev}: empty settle target"
+
+  _n=0
+  while [ "${_n}" -lt "${_settle}" ]; do
+    if ping -c 1 -W 1 -I "${_dev}" "${_tgt}" >/dev/null 2>&1; then
+      echo "netroot: ${_dev} settled (ping ${_tgt})" >&2
+      return 0
+    fi
+    _n=$((_n + 1))
+    if [ "${_n}" -eq 1 ] || [ $((_n % 5)) -eq 0 ]; then
+      echo "yaramfs: netroot: waiting for ${_dev} ping ${_tgt} (${_n}/${_settle}s)" >&2
+    fi
+  done
+  die ${LINENO} "netroot: ${_dev} not ready after ${_settle}s (ping ${_tgt})"
+}
+
+# Shared path: CFG for macid → find iface → up → vlan → optional MTU → optional v4 → optional RA → settle.
 _netroot_apply_macid() {
   _m=$1
   _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid: ${_m}"
@@ -264,6 +303,8 @@ _netroot_apply_macid() {
     _nr_l3="none"
   fi
   echo "netroot: mac=${_m} if=${_ifname} addr=${_addr_dev} ${_nr_l3} gw=${_gw:-none} vlan=${_vlan:-0} mtu=${_mtu:-default} ipv6_ra=${_ra_on}" >&2
+
+  _netroot_wait_settle "${_addr_dev}"
 }
 
 # macids from iBFT ethernet* (if present).
@@ -302,6 +343,9 @@ _netroot_collect_cfg_macids() {
 
 boot() {
   default_if_unset YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR "/sys/firmware/ibft" ${LINENO}
+  default_if_unset YARAMFS_CFG_BOOT_NETROOT_SETTLE "30" ${LINENO}
+  printf '%s\n' "${YARAMFS_CFG_BOOT_NETROOT_SETTLE}" | grep -Eq '^[0-9]+$' \
+    || die ${LINENO} "YARAMFS_CFG_BOOT_NETROOT_SETTLE must be a non-negative integer"
 
   _netroot_macids=
   _netroot_collect_ibft_macids

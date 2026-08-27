@@ -135,11 +135,14 @@
 # Unset IPv4/VLAN fields filled from iBFT ethernet* with the same MAC when present.
 # Pre-set CFG always wins. Optional GATEWAY → IPv4 default route.
 # IPV6_ENABLE_RA=1 → disable_ipv6=0, accept_ra=1, autoconf=1 on address iface.
-# No wait for SLAAC/route (later hooks may race; iscsi timeout is a blunt backstop).
+# After configure: settle by pinging IPv4 brd (from ip) or ff02::1; any reply OK (self counts).
 # =============================================================================
 
 # iBFT sysfs root (default: /sys/firmware/ibft). Used to discover MACs / fill unset fields.
 #YARAMFS_CFG_BOOT_NETROOT_IBFT_DIR=/sys/firmware/ibft
+
+# Max seconds to wait per iface for settle ping (default: 30). 0 = skip settle.
+#YARAMFS_CFG_BOOT_NETROOT_SETTLE=30
 
 # Per-NIC (replace <macid> with e.g. 525400123456):
 #YARAMFS_CFG_BOOT_NETROOT_<macid>_IP=10.0.2.15
