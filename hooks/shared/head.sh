@@ -70,18 +70,6 @@ sh_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-# True if $1 is safe as a free-form eval string (yaramfs_safe_eval).
-# Allowlist: alnum, underscore, quotes, space, slash, dot, colon, hyphen, equals.
-yaramfs_is_eval_safe() {
-  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_='\''" /.:-]*$'
-}
-
-# eval $1 only if yaramfs_is_eval_safe. Prefer yaramfs_set_var for assignments.
-yaramfs_safe_eval() {
-  yaramfs_is_eval_safe "$1" || die ${LINENO} "unsafe eval"
-  eval "$1"
-}
-
 # Coarse net/config token: no spaces, slashes, or shell metacharacters.
 # Field rules (digits-only VLAN/MTU, etc.) still apply on top where needed.
 yaramfs_is_net_token() {
