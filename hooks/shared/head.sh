@@ -7,19 +7,49 @@ die() { echo "$0:$1 $2" >&2; exit 1; }
 : ${YARAMFS_CFG_CONFIG_DIR:=config}
 : ${YARAMFS_CFG_EXPORTS_FILE:=/tmp/yaramfs_exports}
 
+# True if $1 is a POSIX-ish shell variable name (dynamic assign/read).
+yaramfs_is_shell_name() {
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'
+}
+
+# Assign NAME=VALUE via deferred eval (only NAME is interpolated into eval text).
+yaramfs_set_var() {
+  _ysv_name=$1
+  _ysv_val=$2
+  yaramfs_is_shell_name "${_ysv_name}" \
+    || die ${LINENO} "invalid variable name: ${_ysv_name}"
+  eval "${_ysv_name}=\"\${_ysv_val}\""
+}
+
+# Print current value of NAME (empty if unset).
+yaramfs_get_var() {
+  _ygv_name=$1
+  yaramfs_is_shell_name "${_ygv_name}" \
+    || die ${LINENO} "invalid variable name: ${_ygv_name}"
+  eval "printf '%s' \"\${${_ygv_name}}\""
+}
+
+# True if NAME is set (including empty).
+yaramfs_var_is_set() {
+  _yvs_name=$1
+  yaramfs_is_shell_name "${_yvs_name}" \
+    || die ${LINENO} "invalid variable name: ${_yvs_name}"
+  eval "_yvs_set=\${${_yvs_name}+x}"
+  [ -n "${_yvs_set}" ]
+}
+
 default_value() {
   var_name="$1"
   default_var_value="$2"
   caller_lineno="$3"
 
-  eval "current_value=\${${var_name}}"
-
   if [ -z "${default_var_value}" ]; then
     die ${caller_lineno} "default value for ${var_name} is empty"
   fi
 
+  current_value=$(yaramfs_get_var "${var_name}")
   if [ -z "${current_value}" ]; then
-    eval "${var_name}=\"\${default_var_value}\""
+    yaramfs_set_var "${var_name}" "${default_var_value}"
   fi
 }
 
@@ -30,10 +60,8 @@ default_if_unset() {
   default_var_value="$2"
   caller_lineno="$3"
 
-  # ${var+x} expands to x if set (even to ""), else nothing.
-  eval "is_set=\${${var_name}+x}"
-  if [ -z "${is_set}" ]; then
-    eval "${var_name}=\"\${default_var_value}\""
+  if ! yaramfs_var_is_set "${var_name}"; then
+    yaramfs_set_var "${var_name}" "${default_var_value}"
   fi
 }
 
@@ -42,11 +70,22 @@ sh_quote() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-# True (exit 0) if $1 is safe to interpolate into eval assignments.
-# Allowlist: alnum, underscore, quotes, space, slash, dot, colon
-# (dot/colon for IPs, netmasks, MAC strings before normalization).
+# True if $1 is safe as a free-form eval string (yaramfs_safe_eval).
+# Allowlist: alnum, underscore, quotes, space, slash, dot, colon, hyphen, equals.
 yaramfs_is_eval_safe() {
-  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_'\''" /.:-]*$'
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_='\''" /.:-]*$'
+}
+
+# eval $1 only if yaramfs_is_eval_safe. Prefer yaramfs_set_var for assignments.
+yaramfs_safe_eval() {
+  yaramfs_is_eval_safe "$1" || die ${LINENO} "unsafe eval"
+  eval "$1"
+}
+
+# Coarse net/config token: no spaces, slashes, or shell metacharacters.
+# Field rules (digits-only VLAN/MTU, etc.) still apply on top where needed.
+yaramfs_is_net_token() {
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9.:-]+$'
 }
 
 # export_cfg [VAR_NAME...]
@@ -68,14 +107,14 @@ export_cfg() {
         *) continue ;;
       esac
       [ -n "${_ec_name}" ] || continue
-      eval "_ec_val=\${${_ec_name}}"
+      _ec_val=$(yaramfs_get_var "${_ec_name}")
       printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
         || die ${LINENO} "write ${_ec_file} failed"
     done
   else
     for _ec_name in "$@"; do
       [ -n "${_ec_name}" ] || continue
-      eval "_ec_val=\${${_ec_name}}"
+      _ec_val=$(yaramfs_get_var "${_ec_name}")
       printf 'export %s=%s\n' "${_ec_name}" "$(sh_quote "${_ec_val}")" >> "${_ec_file}" \
         || die ${LINENO} "write ${_ec_file} failed"
     done
@@ -307,15 +346,7 @@ yaramfs_preserve_env() {
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
     var_name="_${var_name}"
-
-    # paranoid, as we will pass to eval (see yaramfs_is_eval_safe)
-    if ! yaramfs_is_eval_safe "${var_name}"; then
-      die ${LINENO} "invalid variable name: ${var_name}"
-    fi
-    if ! yaramfs_is_eval_safe "${var_val}"; then
-      die ${LINENO} "invalid variable value: ${var_name}"
-    fi
-    eval "${var_name}=\"${var_val}\""
+    yaramfs_set_var "${var_name}" "${var_val}"
   done
 }
 
@@ -336,14 +367,7 @@ yaramfs_restore_env() {
     esac
     var_val=$(echo "${var}" | cut -d= -s -f2-)
     var_name=${var_name#_} # remove leading underscore
-    # paranoid, as we will pass to eval (see yaramfs_is_eval_safe)
-    if ! yaramfs_is_eval_safe "${var_name}"; then
-      die ${LINENO} "invalid variable name: ${var_name}"
-    fi
-    if ! yaramfs_is_eval_safe "${var_val}"; then
-      die ${LINENO} "invalid variable value: ${var_name}"
-    fi
-    eval "${var_name}=\"${var_val}\""
+    yaramfs_set_var "${var_name}" "${var_val}"
     unset "_${var_name}" # cleanup preserved variable
   done
 }

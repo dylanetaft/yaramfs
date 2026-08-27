@@ -89,22 +89,28 @@ _netroot_cfg_get() {
   _m=$1
   _suf=$2
   _netroot_is_macid "${_m}" || die ${LINENO} "invalid macid for cfg get: ${_m}"
-  eval "_nr_v=\${YARAMFS_CFG_BOOT_NETROOT_${_m}_${_suf}}"
-  printf '%s' "${_nr_v}"
+  yaramfs_get_var "YARAMFS_CFG_BOOT_NETROOT_${_m}_${_suf}"
 }
 
-# If CFG field unset, set from $3 after yaramfs_is_eval_safe (firmware path).
+# Empty OK; otherwise must be a net token (no spaces, slashes, shell metacharacters).
+_netroot_require_net_token() {
+  _nrt_label=$1
+  _nrt_val=$2
+  [ -z "${_nrt_val}" ] && return 0
+  yaramfs_is_net_token "${_nrt_val}" \
+    || die ${LINENO} "netroot: unsafe ${_nrt_label}"
+}
+
+# If CFG field unset, set from $3 after yaramfs_is_net_token (firmware path).
 _netroot_default_from_fw() {
   _m=$1
   _suf=$2
   _fw=$3
   _name="YARAMFS_CFG_BOOT_NETROOT_${_m}_${_suf}"
-  eval "_nr_set=\${${_name}+x}"
-  [ -z "${_nr_set}" ] || return 0
+  yaramfs_var_is_set "${_name}" && return 0
   [ -n "${_fw}" ] || return 0
-  if ! yaramfs_is_eval_safe "${_fw}"; then
-    die ${LINENO} "unsafe iBFT value for ${_name}"
-  fi
+  yaramfs_is_net_token "${_fw}" \
+    || die ${LINENO} "unsafe iBFT value for ${_name}"
   default_if_unset "${_name}" "${_fw}" ${LINENO}
 }
 
@@ -187,31 +193,24 @@ _netroot_apply_macid() {
   _mtu=$(_netroot_trim "$(_netroot_cfg_get "${_m}" MTU)")
   _ra=$(_netroot_trim "$(_netroot_cfg_get "${_m}" IPV6_ENABLE_RA)")
 
-  if [ -n "${_ip}" ] && ! yaramfs_is_eval_safe "${_ip}"; then
-    die ${LINENO} "netroot ${_m}: unsafe IP"
-  fi
-  if [ -n "${_prefix}" ] && ! yaramfs_is_eval_safe "${_prefix}"; then
-    die ${LINENO} "netroot ${_m}: unsafe PREFIX"
-  fi
-  if [ -n "${_mask}" ] && ! yaramfs_is_eval_safe "${_mask}"; then
-    die ${LINENO} "netroot ${_m}: unsafe NETMASK"
-  fi
-  if [ -n "${_gw}" ] && ! yaramfs_is_eval_safe "${_gw}"; then
-    die ${LINENO} "netroot ${_m}: unsafe GATEWAY"
-  fi
-  if [ -n "${_vlan}" ] && ! yaramfs_is_eval_safe "${_vlan}"; then
-    die ${LINENO} "netroot ${_m}: unsafe VLAN"
-  fi
-  if [ -n "${_mtu}" ] && ! yaramfs_is_eval_safe "${_mtu}"; then
-    die ${LINENO} "netroot ${_m}: unsafe MTU"
-  fi
-  if [ -n "${_ra}" ] && ! yaramfs_is_eval_safe "${_ra}"; then
-    die ${LINENO} "netroot ${_m}: unsafe IPV6_ENABLE_RA"
-  fi
+  _netroot_require_net_token "${_m} IP" "${_ip}"
+  _netroot_require_net_token "${_m} NETMASK" "${_mask}"
+  _netroot_require_net_token "${_m} GATEWAY" "${_gw}"
 
+  if [ -n "${_prefix}" ]; then
+    printf '%s\n' "${_prefix}" | grep -Eq '^[0-9]+$' \
+      || die ${LINENO} "netroot ${_m}: PREFIX must be a decimal integer"
+  fi
+  if [ -n "${_vlan}" ]; then
+    printf '%s\n' "${_vlan}" | grep -Eq '^[0-9]+$' \
+      || die ${LINENO} "netroot ${_m}: VLAN must be a decimal integer"
+  fi
   if [ -n "${_mtu}" ]; then
     printf '%s\n' "${_mtu}" | grep -Eq '^[0-9]+$' \
       || die ${LINENO} "netroot ${_m}: MTU must be a decimal integer"
+  fi
+  if [ -n "${_ra}" ] && [ "${_ra}" != "1" ]; then
+    die ${LINENO} "netroot ${_m}: IPV6_ENABLE_RA must be 1 if set"
   fi
 
   _ra_on=0
